@@ -1,0 +1,14 @@
+# Miniflux Dashboard — Docker Compose
+#
+# Uses host networking so the SSH tunnel to the Miniflux DB works
+# (Tailscale is on the host, not inside the container).
+
+services:
+  dashboard:
+    build: .
+    container_name: miniflux-dashboard
+    network_mode: "host"
+    env_file: .env
+    volumes:
+      - ~/.ssh/id_rsa:/root/.ssh/id_rsa:ro
+    restart: unless-stopped

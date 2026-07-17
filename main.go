@@ -83,6 +83,8 @@ func (t *tunnel) open(cfg config) error {
 
 	cmd := exec.Command("ssh",
 		"-f", "-N",
+		"-o", "StrictHostKeyChecking=accept-new",
+		"-o", "UserKnownHostsFile=/dev/null",
 		"-L", fmt.Sprintf("%d:127.0.0.1:%d", cfg.sshTunnel, cfg.sshRemote),
 		cfg.sshHost,
 	)
