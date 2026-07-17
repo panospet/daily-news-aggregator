@@ -1,0 +1,51 @@
+{{define "articles"}}
+<div id="articles" class="articles-container">
+    {{range .Categories}}
+    <section class="category-section" id="cat-{{.Category}}">
+        <div class="category-header">
+            <h2 class="category-title">
+                <span class="cat-icon">{{catIcon .Category}}</span>
+                {{upper .Category}}
+            </h2>
+            <span class="category-count">{{.Count}} article{{if ne .Count 1}}s{{end}}</span>
+        </div>
+
+        {{if eq .Count 0}}
+        <div class="empty-category">
+            <p>No articles in this category 🐻</p>
+        </div>
+        {{else}}
+        <div class="article-grid">
+            {{range .Articles}}
+            <article class="article-card">
+                <div class="card-body">
+                    <h3 class="article-title">
+                        <a href="{{.URL}}" target="_blank" rel="noopener">{{.Title}}</a>
+                    </h3>
+                    <div class="article-meta">
+                        <span class="article-source">📡 {{.Feed}}</span>
+                        <span class="article-time">🕐 {{.TimeAgo}}</span>
+                    </div>
+                </div>
+                <div class="card-footer">
+                    <a href="{{.URL}}" target="_blank" rel="noopener" class="read-link">
+                        Read original →
+                    </a>
+                    <div class="preview-placeholder"></div>
+                </div>
+            </article>
+            {{end}}
+        </div>
+        {{end}}
+    </section>
+    {{end}}
+
+    {{if eq (len .Categories) 0}}
+    <div class="empty-state">
+        <div class="empty-icon">📭</div>
+        <h2>No articles found</h2>
+        <p>Try adjusting your filter or search query</p>
+    </div>
+    {{end}}
+</div>
+{{end}}

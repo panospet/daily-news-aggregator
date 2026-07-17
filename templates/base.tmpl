@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Miniflux Dashboard</title>
+    <script defer src="/static/htmx.min.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body hx-headers='{"HX-Request": "true"}'>
+    <header class="top-bar">
+        <div class="container">
+            <div class="top-bar-inner">
+                <h1 class="logo">📰 Miniflux</h1>
+                <span class="subtitle">Your daily feed, live</span>
+                <div class="top-bar-actions">
+                    <button class="theme-toggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'" title="Toggle theme">🌓</button>
+                    <span class="update-badge" id="update-badge" style="display:none">✨ New articles</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="container" id="main-content">
+        {{ block "page" . }}
+        <section id="controls" class="controls">
+            <div class="search-box">
+                <input type="search" name="q" placeholder="Search articles..." autocomplete="off"
+                       hx-get="/search"
+                       hx-trigger="input changed delay:300ms, search"
+                       hx-target="#articles"
+                       hx-push-url="false">
+                <span class="search-hint">Type to filter — searches titles & sources</span>
+            </div>
+
+            <div class="filter-tabs" id="filter-tabs">
+                <button class="filter-btn active" hx-get="/filter?cat=all" hx-target="#articles" hx-push-url="true" hx-indicator="#loading">
+                    📋 All <span class="count-badge">{{.Total}}</span>
+                </button>
+                {{range .Categories}}
+                <button class="filter-btn" hx-get="/filter?cat={{.Category}}" hx-target="#articles" hx-push-url="true" hx-indicator="#loading">
+                    {{catIcon .Category}} {{upper .Category}} <span class="count-badge">{{.Count}}</span>
+                </button>
+                {{end}}
+            </div>
+
+            <div class="refresh-bar">
+                <span class="last-updated" id="last-updated">Updated: {{.Generated}}</span>
+                <button class="refresh-btn" hx-get="/" hx-target="#articles" hx-indicator="#loading" hx-swap="innerHTML">
+                    🔄 Refresh
+                </button>
+            </div>
+        </section>
+
+        <div id="loading" class="htmx-indicator loading-bar">
+            <div class="loading-bar-inner"></div>
+        </div>
+
+        {{ template "articles" . }}
+        {{ end }}
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <p>Powered by <a href="https://miniflux.app" target="_blank">Miniflux</a> · <a href="https://htmx.org" target="_blank">HTMX</a> · <a href="https://go.dev" target="_blank">Go</a></p>
+        </div>
+    </footer>
+
+    <!-- Auto-refresh every 60s -->
+    <div hx-get="/stats" hx-trigger="every 60s" hx-target="#stats-tab" hx-swap="outerHTML" hx-indicator="none"></div>
+    <div hx-get="/" hx-trigger="every 120s" hx-target="#articles" hx-swap="innerHTML" hx-indicator="#loading"></div>
+</body>
+</html>
