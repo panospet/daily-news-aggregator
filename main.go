@@ -1332,7 +1332,6 @@ func (s *server) handleSummarize(w http.ResponseWriter, r *http.Request) {
 		if !strings.EqualFold(cg.Category, cat) {
 			continue
 		}
-		// Try group_id first
 		if groupID != "" {
 			for _, g := range cg.Groups {
 				if g.GroupID == groupID {
@@ -1343,8 +1342,8 @@ func (s *server) handleSummarize(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		}
-		// Fallback to index lookup
-		if !found && groupIdx >= 0 && groupIdx < len(cg.Groups) {
+		// Fallback to index lookup ONLY if no group_id was provided (legacy clients)
+		if !found && groupID == "" && groupIdx >= 0 && groupIdx < len(cg.Groups) {
 			targetGroup = cg.Groups[groupIdx]
 			targetTopic = cg.Groups[groupIdx].Topic
 			found = true
@@ -1355,7 +1354,11 @@ func (s *server) handleSummarize(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !found {
-		http.Error(w, "Group not found", http.StatusNotFound)
+		// group_id provided but not found = page data is stale (cache refresh changed groups)
+		// Return a friendly HTMX fragment so the user knows to refresh, instead of serving wrong data
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<div class="summary-refresh">⚠️ Τα δεδομένα άλλαξαν. Κάνε <a href="/" hx-get="/" hx-target="body">ανανέωση</a> και δοκίμασε ξανά.</div>`))
 		return
 	}
 
