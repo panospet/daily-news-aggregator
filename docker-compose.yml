@@ -11,4 +11,5 @@ services:
     env_file: .env
     volumes:
       - ~/.ssh/id_rsa:/root/.ssh/id_rsa:ro
+      - ~/.hermes/models:/root/.fastembed_cache:rw
     restart: unless-stopped

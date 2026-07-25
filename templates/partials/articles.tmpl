@@ -5,35 +5,38 @@
         <div class="category-header">
             <h2 class="category-title">
                 <span class="cat-icon">{{catIcon .Category}}</span>
-                {{upper .Category}}
+                {{.Category}}
             </h2>
-            <span class="category-count">{{.Count}} article{{if ne .Count 1}}s{{end}}</span>
+            <span class="category-count">{{.Count}} άρθρ{{if ne .Count 1}}α{{else}}ο{{end}}</span>
         </div>
 
         {{if eq .Count 0}}
         <div class="empty-category">
-            <p>No articles in this category 🐻</p>
+            <p>Δεν υπάρχουν άρθρα σε αυτήν την κατηγορία 🐻</p>
         </div>
         {{else}}
-        <div class="article-grid">
-            {{range .Articles}}
-            <article class="article-card">
-                <div class="card-body">
-                    <h3 class="article-title">
-                        <a href="{{.URL}}" target="_blank" rel="noopener">{{.Title}}</a>
-                    </h3>
-                    <div class="article-meta">
-                        <span class="article-source">📡 {{.Feed}}</span>
-                        <span class="article-time">🕐 {{.TimeAgo}}</span>
+        <div class="topic-grid">
+            {{$cat := .Category}}
+            {{range $idx, $group := .Groups}}
+            <div class="topic-card" id="topic-{{$idx}}">
+                <div class="topic-header" 
+                     hx-post="/summarize"
+                     hx-vals='{"category": "{{$cat}}", "group_id": "{{$group.GroupID}}", "group": "{{$idx}}"}'
+                     hx-target="closest .topic-card"
+                     hx-swap="outerHTML"
+                     hx-indicator="#loading">
+                    <div class="topic-title-row">
+                        <span class="topic-count-badge">{{$group.Count}}</span>
+                        <h3 class="topic-title">{{$group.Topic}}</h3>
+                        <span class="topic-expand-icon">▼</span>
+                    </div>
+                    <div class="topic-preview">
+                        {{range uniqueFeeds $group.Articles}}
+                        <span class="topic-source-tag">{{.}}</span>
+                        {{end}}
                     </div>
                 </div>
-                <div class="card-footer">
-                    <a href="{{.URL}}" target="_blank" rel="noopener" class="read-link">
-                        Read original →
-                    </a>
-                    <div class="preview-placeholder"></div>
-                </div>
-            </article>
+            </div>
             {{end}}
         </div>
         {{end}}
@@ -43,9 +46,69 @@
     {{if eq (len .Categories) 0}}
     <div class="empty-state">
         <div class="empty-icon">📭</div>
-        <h2>No articles found</h2>
-        <p>Try adjusting your filter or search query</p>
+        <h2>Δεν βρέθηκαν άρθρα</h2>
+        <p>Δοκιμάστε να αλλάξετε το φίλτρο ή την αναζήτηση</p>
     </div>
     {{end}}
+</div>
+{{end}}
+
+{{define "summary"}}
+<div class="topic-card expanded" id="summary-card">
+    <div class="topic-header" onclick="this.closest('.topic-card').classList.toggle('expanded')">
+        <div class="topic-title-row">
+            <span class="topic-expand-icon">▼</span>
+            <h3 class="topic-title">{{.Topic}}</h3>
+        </div>
+    </div>
+    <div class="summary-body">
+        <div class="summary-text">
+            {{.Summary}}
+        </div>
+        <div class="summary-sources">
+            <h4 class="sources-title">📰 Πηγές / Sources</h4>
+            <ul class="sources-list">
+                {{range .Articles}}
+                <li class="source-item">
+                    <a href="{{.URL}}" target="_blank" rel="noopener" class="source-link">
+                        <span class="source-name">{{.Title}}</span>
+                        <span class="source-arrow">→</span>
+                    </a>
+                    <span class="source-meta">{{.Feed}}</span>
+                </li>
+                {{end}}
+            </ul>
+        </div>
+    </div>
+</div>
+{{end}}
+
+{{define "summary-fallback"}}
+<div class="topic-card expanded" id="summary-fallback-card">
+    <div class="topic-header" onclick="this.closest('.topic-card').classList.toggle('expanded')">
+        <div class="topic-title-row">
+            <span class="topic-expand-icon">▼</span>
+            <h3 class="topic-title">{{.Topic}}</h3>
+        </div>
+    </div>
+    <div class="summary-body">
+        <div class="summary-text">
+            <em>⚠️ Η περίληψη δεν ήταν διαθέσιμη. Δείτε τις πηγές παρακάτω:</em>
+        </div>
+        <div class="summary-sources">
+            <h4 class="sources-title">📰 Sources</h4>
+            <ul class="sources-list">
+                {{range .Articles}}
+                <li class="source-item">
+                    <a href="{{.URL}}" target="_blank" rel="noopener" class="source-link">
+                        <span class="source-name">{{.Title}}</span>
+                        <span class="source-arrow">→</span>
+                    </a>
+                    <span class="source-meta">{{.Feed}} · {{.TimeAgo}}</span>
+                </li>
+                {{end}}
+            </ul>
+        </div>
+    </div>
 </div>
 {{end}}

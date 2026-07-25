@@ -1,5 +1,6 @@
 # Binaries
 htmx-daily-news
+htmx-daily-news-bin
 *.exe
 *.exe~
 *.dll

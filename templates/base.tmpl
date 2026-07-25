@@ -4,19 +4,31 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Miniflux Dashboard</title>
+    <title>Miniflux AI Dashboard</title>
     <script defer src="/static/htmx.min.js"></script>
+    <script defer>
+        // Auto-refresh the articles every 10min, but only if no card is expanded
+        document.addEventListener('DOMContentLoaded', function() {
+            setInterval(function() {
+                if (document.querySelector('.topic-card.expanded')) return;
+                htmx.ajax('GET', '/', {target: '#articles', swap: 'innerHTML', indicator: '#loading'});
+            }, 600000);
+            setInterval(function() {
+                htmx.ajax('GET', '/stats', {target: '#stats-tab', swap: 'outerHTML'});
+            }, 60000);
+        });
+    </script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body hx-headers='{"HX-Request": "true"}'>
     <header class="top-bar">
         <div class="container">
             <div class="top-bar-inner">
-                <h1 class="logo">📰 Miniflux</h1>
-                <span class="subtitle">Your daily feed, live</span>
+                <h1 class="logo">🤖 Miniflux AI</h1>
+                <span class="subtitle">AI ομαδοποίηση · {{.Total}} άρθρα</span>
                 <div class="top-bar-actions">
                     <button class="theme-toggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'" title="Toggle theme">🌓</button>
-                    <span class="update-badge" id="update-badge" style="display:none">✨ New articles</span>
+                    <button class="refresh-btn" hx-get="/" hx-target="#articles" hx-indicator="#loading" hx-swap="innerHTML" title="Refresh">🔄</button>
                 </div>
             </div>
         </div>
@@ -26,12 +38,12 @@
         {{ block "page" . }}
         <section id="controls" class="controls">
             <div class="search-box">
-                <input type="search" name="q" placeholder="Search articles..." autocomplete="off"
+                <input type="search" name="q" placeholder="Αναζήτηση άρθρων..." autocomplete="off"
                        hx-get="/search"
                        hx-trigger="input changed delay:300ms, search"
                        hx-target="#articles"
                        hx-push-url="false">
-                <span class="search-hint">Type to filter — searches titles & sources</span>
+                <span class="search-hint">Αναζήτηση σε τίτλους και πηγές</span>
             </div>
 
             <div class="filter-tabs" id="filter-tabs">
@@ -40,16 +52,14 @@
                 </button>
                 {{range .Categories}}
                 <button class="filter-btn" hx-get="/filter?cat={{.Category}}" hx-target="#articles" hx-push-url="true" hx-indicator="#loading">
-                    {{catIcon .Category}} {{upper .Category}} <span class="count-badge">{{.Count}}</span>
+                    {{catIcon .Category}} {{.Category}} <span class="count-badge">{{.Count}}</span>
                 </button>
                 {{end}}
             </div>
 
             <div class="refresh-bar">
-                <span class="last-updated" id="last-updated">Updated: {{.Generated}}</span>
-                <button class="refresh-btn" hx-get="/" hx-target="#articles" hx-indicator="#loading" hx-swap="innerHTML">
-                    🔄 Refresh
-                </button>
+                <span class="last-updated" id="last-updated">Ενημερώθηκε: {{.Generated}}</span>
+                <span id="stats-tab" class="inline-stats">🤖 {{.Total}} άρθρα σε {{len .Categories}} κατηγορίες</span>
             </div>
         </section>
 
@@ -63,13 +73,9 @@
 
     <footer class="footer">
         <div class="container">
-            <p>Powered by <a href="https://miniflux.app" target="_blank">Miniflux</a> · <a href="https://htmx.org" target="_blank">HTMX</a> · <a href="https://go.dev" target="_blank">Go</a></p>
+            <p>Powered by <a href="https://miniflux.app" target="_blank">Miniflux</a> · <a href="https://gemini.google.com" target="_blank">Gemini AI</a> · <a href="https://htmx.org" target="_blank">HTMX</a> · <a href="https://go.dev" target="_blank">Go</a></p>
         </div>
     </footer>
-
-    <!-- Auto-refresh every 60s -->
-    <div hx-get="/stats" hx-trigger="every 60s" hx-target="#stats-tab" hx-swap="outerHTML" hx-indicator="none"></div>
-    <div hx-get="/" hx-trigger="every 120s" hx-target="#articles" hx-swap="innerHTML" hx-indicator="#loading"></div>
 </body>
 </html>
 {{end}}
