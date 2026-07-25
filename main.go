@@ -1248,7 +1248,13 @@ func (s *server) categoryFilter(w http.ResponseWriter, r *http.Request) {
 	}
 	filtered.Generated = data.Generated
 
-	_ = s.tpl.partial.ExecuteTemplate(w, "articles", filtered)
+	// HTMX request: return only the articles partial
+	if r.Header.Get("HX-Request") == "true" {
+		_ = s.tpl.partial.ExecuteTemplate(w, "articles", filtered)
+		return
+	}
+	// Full page load: render base template with filtered data
+	_ = s.tpl.base.ExecuteTemplate(w, "base", filtered)
 }
 
 func (s *server) search(w http.ResponseWriter, r *http.Request) {
@@ -1261,7 +1267,11 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-cache")
 
 	if q == "" {
-		_ = s.tpl.partial.ExecuteTemplate(w, "articles", data)
+		if r.Header.Get("HX-Request") == "true" {
+			_ = s.tpl.partial.ExecuteTemplate(w, "articles", data)
+			return
+		}
+		_ = s.tpl.base.ExecuteTemplate(w, "base", data)
 		return
 	}
 
@@ -1289,7 +1299,13 @@ func (s *server) search(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	_ = s.tpl.partial.ExecuteTemplate(w, "articles", filtered)
+	// HTMX request: return only matched articles partial
+	if r.Header.Get("HX-Request") == "true" {
+		_ = s.tpl.partial.ExecuteTemplate(w, "articles", filtered)
+		return
+	}
+	// Full page load: render base template with matched data
+	_ = s.tpl.base.ExecuteTemplate(w, "base", filtered)
 }
 
 func (s *server) stats(w http.ResponseWriter, r *http.Request) {
