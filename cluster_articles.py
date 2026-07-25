@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import re
 import psycopg2
 # Redirect stderr to devnull to suppress warnings (warnings, collations, etc.)
 sys.stderr = open(os.devnull, 'w')
@@ -63,7 +64,7 @@ def fetch_articles(hours=12):
     since_formatted = time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(since))
 
     query = """
-        SELECT e.id, e.title, e.url, e.published_at, f.title AS feed, c.title AS category
+        SELECT e.id, e.title, e.url, e.published_at, f.title AS feed, c.title AS category, e.content
         FROM entries e
         JOIN feeds f ON f.id = e.feed_id
         JOIN categories c ON c.id = f.category_id
@@ -79,13 +80,19 @@ def fetch_articles(hours=12):
     for row in rows:
         title = row[1].strip()
         if title not in seen:
+            # Extract plain text from HTML content
+            content_html = row[6] if row[6] else ""
+            plain_text = re.sub(r'<[^>]+>', '', content_html)
+            plain_text = re.sub(r'\s+', ' ', plain_text).strip()[:1000]  # first ~1000 chars
+
             seen[title] = {
                 "id": row[0],
                 "title": title,
                 "url": row[2],
                 "published_at": str(row[3]),
                 "feed": row[4],
-                "category": row[5]
+                "category": row[5],
+                "text": plain_text
             }
             articles.append(seen[title])
 
@@ -138,9 +145,9 @@ def cluster_super_group(articles, model, distance_threshold=0.45):
     if len(articles) < 2:
         return [[a] for a in articles]  # all singletons
 
-    # Embed and normalize
-    titles = [a["title"] for a in articles]
-    embeddings_gen = model.embed(titles)
+    # Embed and normalize — use title + content text for richer signal
+    texts = [f"{a['title']} {a['text']}".strip() for a in articles]
+    embeddings_gen = model.embed(texts)
     embeddings = np.array(list(embeddings_gen))
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
     embeddings = embeddings / np.where(norms == 0, 1e-12, norms)
