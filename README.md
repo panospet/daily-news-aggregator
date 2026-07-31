@@ -27,7 +27,7 @@ A real-time news dashboard powered by Go + HTMX. Connects to a [Miniflux](https:
 ### 1. Clone & configure
 
 ```bash
-git clone https://github.com/ppapacon/htmx-daily-news.git
+git clone https://github.com/panospet/htmx-daily-news.git
 cd htmx-daily-news
 cp .env.example .env
 # Edit .env with your Miniflux DB credentials

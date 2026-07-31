@@ -4,7 +4,7 @@ WORKDIR /app
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/miniflux-dashboard .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /app/miniflux-dashboard ./cmd/server
 
 # Run stage
 FROM python:3.11-slim-bookworm
