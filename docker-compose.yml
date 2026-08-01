@@ -11,5 +11,107 @@ services:
     env_file: .env
     volumes:
       - ~/.ssh/id_rsa:/root/.ssh/id_rsa:ro
-      - ~/.hermes/models:/root/.fastembed_cache:rw
     restart: unless-stopped
+    depends_on:
+      - ai-service
+      - redis
+
+  ai-service:
+    build: ./ai
+    container_name: miniflux-ai-service
+    env_file: .env
+    volumes:
+      - ~/.hermes/models:/root/.cache/fastembed:rw
+    ports:
+      - "127.0.0.1:8001:8000"
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: dashboard-redis
+    ports:
+      - "127.0.0.1:6379:6379"
+    restart: unless-stopped
+
+  miniflux:
+    image: miniflux/miniflux:latest
+    ports:
+      - "9292:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+      cloudflared-client:
+        condition: service_started
+    env_file: .miniflux.env
+    environment:
+      - RUN_MIGRATIONS=1
+      - CREATE_ADMIN=1
+      - ADMIN_USERNAME=admin
+      - PROXY_URL=http://cloudflared-client:8888
+      - FETCHER_ALLOW_PRIVATE_NETWORKS=1
+      - INTEGRATION_ALLOW_PRIVATE_NETWORKS=1
+      - HTTP_CLIENT_TIMEOUT=120
+    restart: always
+
+  db:
+    image: postgres:15
+    ports:
+      - "127.0.0.1:5435:5432"
+    env_file: .miniflux.env
+    environment:
+      - POSTGRES_USER=miniflux
+      - POSTGRES_DB=miniflux
+    volumes:
+      - miniflux-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "miniflux"]
+      interval: 10s
+      start_period: 30s
+    restart: always
+
+  cloudflared-client:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    env_file: .miniflux.env
+    command: >
+      access tcp
+      --hostname tinyproxy.panos.pet
+      --url 0.0.0.0:8888
+      --service-token-id $${CF_CLIENT_ID}
+      --service-token-secret $${CF_CLIENT_SECRET}
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    environment:
+      - LOG_LEVEL=info
+      - PROXY=http://cloudflared-client:8888
+    depends_on:
+      - cloudflared-client
+    restart: unless-stopped
+
+  flareproxy:
+    build: ./flareproxy
+    ports:
+      - "8005:8000"
+    environment:
+      - FLARESOLVERR_URL=http://flaresolverr:8191/v1
+      - GUNICORN_CMD_ARGS=--timeout 120
+    depends_on:
+      - flaresolverr
+    restart: unless-stopped
+
+  db-cleanup:
+    image: postgres:15-alpine
+    env_file: .miniflux.env
+    volumes:
+      - ./cleanup-cron:/etc/periodic/daily/cleanup-feed-entries
+    entrypoint: ["sh", "-c", "chmod +x /etc/periodic/daily/cleanup-feed-entries && exec crond -f -l 2"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  miniflux-db:
+    external: true
+    name: miniflux_local_miniflux-db

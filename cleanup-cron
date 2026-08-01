@@ -1,0 +1,51 @@
+#!/bin/sh
+echo "Starting daily Miniflux database cleanup task..."
+
+# Set defaults if not provided in environment
+CLEANUP_ARCHIVE_UNREAD_DAYS=${CLEANUP_ARCHIVE_UNREAD_DAYS:-15}
+CLEANUP_ARCHIVE_READ_DAYS=${CLEANUP_ARCHIVE_READ_DAYS:-2}
+
+echo "Pruning unread entries older than $CLEANUP_ARCHIVE_UNREAD_DAYS days and read entries older than $CLEANUP_ARCHIVE_READ_DAYS days..."
+
+# Construct the age-based delete clauses if they are not -1
+DELETE_CLAUSE=""
+if [ "$CLEANUP_ARCHIVE_READ_DAYS" -ne -1 ]; then
+    DELETE_CLAUSE="(status = 'read' AND published_at < NOW() - INTERVAL '$CLEANUP_ARCHIVE_READ_DAYS days')"
+fi
+
+if [ "$CLEANUP_ARCHIVE_UNREAD_DAYS" -ne -1 ]; then
+    if [ -n "$DELETE_CLAUSE" ]; then
+        DELETE_CLAUSE="$DELETE_CLAUSE OR "
+    fi
+    DELETE_CLAUSE="${DELETE_CLAUSE}(status = 'unread' AND published_at < NOW() - INTERVAL '$CLEANUP_ARCHIVE_UNREAD_DAYS days')"
+fi
+
+if [ -n "$DELETE_CLAUSE" ]; then
+    psql -h db -U miniflux -d miniflux -c "
+    DELETE FROM entries e
+    WHERE e.starred = false
+      AND ($DELETE_CLAUSE);
+    "
+fi
+
+# Run the optimized DELETE query to keep only the last 5000 entries per feed (excluding starred articles)
+psql -h db -U miniflux -d miniflux -c "
+WITH keeping AS (
+    SELECT id
+    FROM (
+        SELECT id, ROW_NUMBER() OVER (PARTITION BY feed_id ORDER BY published_at DESC, id DESC) as rn
+        FROM entries
+    ) t
+    WHERE t.rn <= 5000
+)
+DELETE FROM entries e
+WHERE e.starred = false
+  AND NOT EXISTS (
+    SELECT 1 FROM keeping k WHERE k.id = e.id
+  );
+"
+
+# Run VACUUM FULL ANALYZE to reclaim physical disk space and rebuild optimizer statistics
+psql -h db -U miniflux -d miniflux -c "VACUUM FULL ANALYZE entries;"
+
+echo "Database cleanup task completed successfully."
