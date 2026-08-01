@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
 
 	htmxdailynews "github.com/panospet/htmx-daily-news"
@@ -77,12 +79,21 @@ func main() {
 
 	fetchFn := cache.FetchFresh(db, repo, groupSvc, retryFn)
 
+	redisClient := redis.NewClient(&redis.Options{
+		Addr: "127.0.0.1:6379",
+	})
+	if err := redisClient.Ping(context.Background()).Err(); err != nil {
+		log.Printf("Warning: Redis connection failed: %v", err)
+	} else {
+		log.Println("Redis connected successfully")
+	}
+
 	srv := &handler.Server{
 		Cfg:         cfg,
 		DB:          db,
 		Tpl:         tpl,
-		Cache:       cache.NewArticleCache(2 * time.Minute),
-		AICache:     cache.NewAICache(60 * time.Minute),
+		Cache:       cache.NewArticleCache(redisClient, 2*time.Minute),
+		AICache:     cache.NewAICache(redisClient, 60*time.Minute),
 		Summarizer:  summarizeSvc,
 		FetchFn:     fetchFn,
 		RetryFn:     retryFn,

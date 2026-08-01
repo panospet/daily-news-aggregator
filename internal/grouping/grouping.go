@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"os/exec"
+	"net/http"
 	"strings"
 	"time"
 
@@ -20,48 +19,40 @@ type Service struct {
 	Gemini gemini.Caller
 }
 
-// GroupArticles runs the Python clustering script to group articles.
-// Falls back to flat grouping if the script fails.
+// GroupArticles calls the Python AI service to cluster articles.
+// Falls back to flat grouping if the service fails.
 func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICategoryGroup, error) {
 	tTotal := time.Now()
 
-	// Create command to run Python clustering script inside standard path
-	cmd := exec.Command("/opt/venv/bin/python3", "cluster_articles.py", "6")
-
-	// Set environment variables for DB access
-	cmd.Env = os.Environ()
-
-	// Execute and collect stdout
-	var outBuf bytes.Buffer
-	cmd.Stdout = &outBuf
-	cmd.Stderr = os.Stderr // Let warnings print to container stderr, don't mix into json!
-	err := cmd.Run()
-	out := outBuf.Bytes()
+	reqBody, err := json.Marshal(map[string]interface{}{"articles": allArticles})
 	if err != nil {
-		log.Printf("[clustering] python subprocess failed: %v, output: %s", err, string(out))
-		// Fallback to flat view
-		catMap := make(map[string][]models.Article)
-		for _, a := range allArticles {
-			catMap[a.Category] = append(catMap[a.Category], a)
-		}
-		preferredOrder := []string{"international", "news", "sports", "music", "politics", "random", "panionara"}
-		return FlatGroupResult(catMap, preferredOrder, config.CatDisplayName), nil
+		return s.fallbackFlat(allArticles), nil
 	}
+
+	resp, err := http.Post("http://127.0.0.1:8001/cluster", "application/json", bytes.NewBuffer(reqBody))
+	if err != nil || resp.StatusCode != 200 {
+		log.Printf("[clustering] AI service call failed: %v", err)
+		return s.fallbackFlat(allArticles), nil
+	}
+	defer resp.Body.Close()
 
 	var data models.AIDashboardData
-	if err := json.Unmarshal(out, &data); err != nil {
-		log.Printf("[clustering] failed to unmarshal python output: %v", err)
-		// Fallback to flat view
-		catMap := make(map[string][]models.Article)
-		for _, a := range allArticles {
-			catMap[a.Category] = append(catMap[a.Category], a)
-		}
-		preferredOrder := []string{"international", "news", "sports", "music", "politics", "random", "panionara"}
-		return FlatGroupResult(catMap, preferredOrder, config.CatDisplayName), nil
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		log.Printf("[clustering] failed to unmarshal AI service response: %v", err)
+		return s.fallbackFlat(allArticles), nil
 	}
 
-	log.Printf("[clustering] Local Embeddings clustering completed in %v", time.Since(tTotal))
+	log.Printf("[clustering] Remote AI clustering completed in %v", time.Since(tTotal))
 	return data.Categories, nil
+}
+
+func (s *Service) fallbackFlat(allArticles []models.Article) []models.AICategoryGroup {
+	catMap := make(map[string][]models.Article)
+	for _, a := range allArticles {
+		catMap[a.Category] = append(catMap[a.Category], a)
+	}
+	preferredOrder := []string{"international", "news", "sports", "music", "politics", "random", "panionara"}
+	return FlatGroupResult(catMap, preferredOrder, config.CatDisplayName)
 }
 
 // GroupCategory groups articles within a single category using Gemini.

@@ -4,13 +4,14 @@ import "time"
 
 // Article represents a single news entry from the Miniflux database.
 type Article struct {
-	ID        int64
-	Title     string
-	URL       string
-	Published time.Time
-	Feed      string
-	Category  string
-	TimeAgo   string
+	ID        int64     `json:"id"`
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	Published time.Time `json:"published_at"`
+	Feed      string    `json:"feed"`
+	Category  string    `json:"category"`
+	Content   string    `json:"content"`
+	TimeAgo   string    `json:"time_ago"`
 }
 
 // CategoryGroup holds articles in a single Miniflux category.
@@ -33,6 +34,7 @@ type AIGroup struct {
 	Articles []Article `json:"articles"`
 	Count    int       `json:"count"`
 	GroupID  string    `json:"group_id,omitempty"`
+	Category string    `json:"category,omitempty"`
 }
 
 // AICategoryGroup collects topic groups under a display category.

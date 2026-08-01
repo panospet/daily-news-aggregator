@@ -2,6 +2,7 @@ package handler
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log"
 	"net/http"
 	"strconv"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/panospet/htmx-daily-news/internal/cache"
 	"github.com/panospet/htmx-daily-news/internal/config"
+	"github.com/panospet/htmx-daily-news/internal/database"
 	"github.com/panospet/htmx-daily-news/internal/models"
 	"github.com/panospet/htmx-daily-news/internal/summarize"
 )
@@ -32,6 +34,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /search", s.Search)
 	mux.HandleFunc("GET /stats", s.Stats)
 	mux.HandleFunc("POST /summarize", s.HandleSummarize)
+	mux.HandleFunc("POST /feedback", s.HandleFeedback)
 }
 
 // Home serves the main dashboard page.
@@ -216,6 +219,7 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 
 	// No AI key — show fallback directly
 	if s.Cfg.GeminiAPIKey == "" {
+		targetGroup.Category = cat
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-fallback", targetGroup)
 		return
@@ -234,16 +238,8 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		fancyTopic := summary.Sources[0]
 		targetTopic = fancyTopic
 
-		// Write-update the cached topic name
-		s.AICache.Mu.Lock()
-		for catIdx, cg := range data.Categories {
-			if strings.EqualFold(cg.Category, cat) {
-				if groupIdx >= 0 && groupIdx < len(cg.Groups) {
-					data.Categories[catIdx].Groups[groupIdx].Topic = fancyTopic
-				}
-			}
-		}
-		s.AICache.Mu.Unlock()
+		// Write-update the cached topic name in Redis
+		s.AICache.UpdateTopic(cat, groupIdx, fancyTopic)
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -252,5 +248,72 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		"Summary":  summary.Summary,
 		"Articles": targetGroup.Articles,
 		"Category": cat,
+		"GroupID":  targetGroup.GroupID,
 	})
+}
+
+// HandleFeedback stores negative feedback for an irrelevant article
+func (s *Server) HandleFeedback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cat := r.FormValue("category")
+	groupID := r.FormValue("group_id")
+	irrelevantUrl := r.FormValue("irrelevant_url")
+
+	if cat == "" || irrelevantUrl == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+
+	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	if err != nil {
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
+	}
+
+	var targetGroup models.AIGroup
+	var targetTopic string
+	found := false
+
+	// Find the exact group being reported
+	for _, cg := range data.Categories {
+		if !strings.EqualFold(cg.Category, cat) {
+			continue
+		}
+		if groupID != "" {
+			for _, g := range cg.Groups {
+				if g.GroupID == groupID {
+					targetGroup = g
+					targetTopic = g.Topic
+					found = true
+					break
+				}
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<span class="feedback-success">Feedback received ✅</span>`)) // Pretend success if group vanished
+		return
+	}
+
+	groupJsonBytes, err := json.Marshal(targetGroup)
+	if err != nil {
+		log.Printf("Failed to marshal group for feedback: %v", err)
+	} else {
+		repo := &database.Repository{DB: s.DB}
+		if err := repo.SaveNegativeFeedback(cat, targetTopic, groupJsonBytes, irrelevantUrl); err != nil {
+			log.Printf("Failed to save negative feedback: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<span class="feedback-success">Feedback received ✅</span>`))
 }

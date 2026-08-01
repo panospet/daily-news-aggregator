@@ -1,126 +1,130 @@
 package cache
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/panospet/htmx-daily-news/internal/database"
 	"github.com/panospet/htmx-daily-news/internal/grouping"
 	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/redis/go-redis/v9"
 )
+
+type RedisWrapper[T any] struct {
+	Data T         `json:"data"`
+	Ts   time.Time `json:"ts"`
+}
 
 // ---------- Article Cache (flat, non-AI) ----------
 
-// ArticleCache caches flat dashboard data with a configurable TTL.
 type ArticleCache struct {
-	mu       sync.RWMutex
-	data     *models.DashboardData
-	ts       time.Time
+	client   *redis.Client
 	interval time.Duration
 }
 
-// NewArticleCache creates a new article cache with the given TTL.
-func NewArticleCache(interval time.Duration) *ArticleCache {
-	return &ArticleCache{interval: interval}
+func NewArticleCache(client *redis.Client, interval time.Duration) *ArticleCache {
+	return &ArticleCache{client: client, interval: interval}
 }
 
-// Get returns cached data or fetches fresh data using the repository and tunnel retry logic.
 func (c *ArticleCache) Get(repo *database.Repository, retryFn func(hours int) (*models.DashboardData, error)) (*models.DashboardData, error) {
-	c.mu.RLock()
-	if c.data != nil && time.Since(c.ts) < c.interval {
-		d := c.data
-		c.mu.RUnlock()
-		return d, nil
-	}
-	c.mu.RUnlock()
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.data != nil && time.Since(c.ts) < c.interval {
-		return c.data, nil
+	ctx := context.Background()
+	val, err := c.client.Get(ctx, "article_cache").Result()
+	if err == nil {
+		var wrapper RedisWrapper[*models.DashboardData]
+		if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil {
+			if time.Since(wrapper.Ts) < c.interval {
+				return wrapper.Data, nil
+			}
+		}
 	}
 
 	data, err := retryFn(6)
 	if err != nil {
-		if c.data != nil {
-			log.Printf("DB query failed, serving stale data: %v", err)
-			return c.data, nil
+		if val != "" {
+			var wrapper RedisWrapper[*models.DashboardData]
+			if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil {
+				log.Printf("DB query failed, serving stale data: %v", err)
+				return wrapper.Data, nil
+			}
 		}
 		return nil, err
 	}
-	c.data = data
-	c.ts = time.Now()
+
+	wrapper := RedisWrapper[*models.DashboardData]{Data: data, Ts: time.Now()}
+	bytes, _ := json.Marshal(wrapper)
+	c.client.Set(ctx, "article_cache", bytes, 0)
 	return data, nil
 }
 
-// Invalidate marks the cache as expired.
 func (c *ArticleCache) Invalidate() {
-	c.mu.Lock()
-	c.ts = time.Time{}
-	c.mu.Unlock()
+	c.client.Del(context.Background(), "article_cache")
 }
 
 // ---------- AI Cache ----------
 
-// FetchFunc is the function type for fetching fresh AI dashboard data.
 type FetchFunc func() (*models.AIDashboardData, error)
 
-// AICache caches AI-grouped dashboard data with a configurable TTL.
 type AICache struct {
-	Mu       sync.RWMutex
-	data     *models.AIDashboardData
-	ts       time.Time
-	interval time.Duration
+	client       *redis.Client
+	interval     time.Duration
+	refreshMutex sync.Mutex
 }
 
-// NewAICache creates a new AI cache with the given TTL.
-func NewAICache(interval time.Duration) *AICache {
-	return &AICache{interval: interval}
+func NewAICache(client *redis.Client, interval time.Duration) *AICache {
+	return &AICache{client: client, interval: interval}
 }
 
-// Get returns cached AI data, triggering background refresh if stale.
 func (c *AICache) Get(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) (*models.AIDashboardData, error) {
-	c.Mu.RLock()
-	if c.data != nil && time.Since(c.ts) < c.interval {
-		d := c.data
-		c.Mu.RUnlock()
-		return d, nil
+	ctx := context.Background()
+	val, err := c.client.Get(ctx, "ai_cache").Result()
+	if err == nil {
+		var wrapper RedisWrapper[*models.AIDashboardData]
+		if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil {
+			if time.Since(wrapper.Ts) < c.interval {
+				return wrapper.Data, nil
+			}
+			go c.refresh(db, fetchFresh)
+			return wrapper.Data, nil
+		}
 	}
-	// Cache expired or empty. If we have stale data, return it immediately
-	// and start a background refresh.
-	if c.data != nil {
-		stale := c.data
-		c.Mu.RUnlock()
-		// Background refresh (non-blocking)
-		go c.refresh(db, fetchFresh)
-		return stale, nil
-	}
-	c.Mu.RUnlock()
 
-	// No stale data available — do a blocking fetch (cold start)
-	c.Mu.Lock()
-	// Double-check
-	if c.data != nil {
-		c.Mu.Unlock()
-		return c.data, nil
+	c.refreshMutex.Lock()
+	defer c.refreshMutex.Unlock()
+
+	val, err = c.client.Get(ctx, "ai_cache").Result()
+	if err == nil {
+		var wrapper RedisWrapper[*models.AIDashboardData]
+		if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil {
+			if time.Since(wrapper.Ts) < c.interval {
+				return wrapper.Data, nil
+			}
+		}
 	}
-	c.Mu.Unlock()
 
 	return c.refreshBlocking(db, fetchFresh)
 }
 
-// refresh fetches fresh AI data in the background and updates the cache.
 func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) {
-	c.Mu.Lock()
-	// Another goroutine already refreshed it
-	if c.data != nil && time.Since(c.ts) < c.interval {
-		c.Mu.Unlock()
+	if !c.refreshMutex.TryLock() {
 		return
 	}
-	c.Mu.Unlock()
+	defer c.refreshMutex.Unlock()
+
+	ctx := context.Background()
+	val, err := c.client.Get(ctx, "ai_cache").Result()
+	if err == nil {
+		var wrapper RedisWrapper[*models.AIDashboardData]
+		if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil {
+			if time.Since(wrapper.Ts) < c.interval {
+				return
+			}
+		}
+	}
 
 	log.Println("AI cache stale — refreshing in background")
 	newData, err := fetchFresh(db)
@@ -129,34 +133,55 @@ func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDas
 		return
 	}
 
-	c.Mu.Lock()
-	c.data = newData
-	c.ts = time.Now()
-	c.Mu.Unlock()
+	wrapper := RedisWrapper[*models.AIDashboardData]{Data: newData, Ts: time.Now()}
+	bytes, _ := json.Marshal(wrapper)
+	c.client.Set(ctx, "ai_cache", bytes, 0)
 	log.Printf("AI cache refreshed — %d articles in %d categories", newData.Total, len(newData.Categories))
 }
 
-// refreshBlocking does a cold-start blocking fetch (no stale data to serve).
 func (c *AICache) refreshBlocking(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) (*models.AIDashboardData, error) {
 	newData, err := fetchFresh(db)
 	if err != nil {
 		return nil, err
 	}
-	c.Mu.Lock()
-	c.data = newData
-	c.ts = time.Now()
-	c.Mu.Unlock()
+	wrapper := RedisWrapper[*models.AIDashboardData]{Data: newData, Ts: time.Now()}
+	bytes, _ := json.Marshal(wrapper)
+	c.client.Set(context.Background(), "ai_cache", bytes, 0)
 	return newData, nil
 }
 
-// Invalidate marks the AI cache as expired.
 func (c *AICache) Invalidate() {
-	c.Mu.Lock()
-	c.ts = time.Time{}
-	c.Mu.Unlock()
+	c.client.Del(context.Background(), "ai_cache")
 }
 
-// FetchFresh queries the DB and runs AI grouping.
+func (c *AICache) UpdateTopic(category string, groupIdx int, newTopic string) {
+	ctx := context.Background()
+	c.refreshMutex.Lock()
+	defer c.refreshMutex.Unlock()
+
+	val, err := c.client.Get(ctx, "ai_cache").Result()
+	if err != nil {
+		return
+	}
+
+	var wrapper RedisWrapper[*models.AIDashboardData]
+	if err := json.Unmarshal([]byte(val), &wrapper); err != nil {
+		return
+	}
+
+	for catIdx, cg := range wrapper.Data.Categories {
+		if strings.EqualFold(cg.Category, category) {
+			if groupIdx >= 0 && groupIdx < len(cg.Groups) {
+				wrapper.Data.Categories[catIdx].Groups[groupIdx].Topic = newTopic
+				break
+			}
+		}
+	}
+
+	bytes, _ := json.Marshal(wrapper)
+	c.client.Set(ctx, "ai_cache", bytes, 0)
+}
+
 func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Service,
 	retryFn func(hours int) (*models.DashboardData, error)) func(db *sql.DB) (*models.AIDashboardData, error) {
 
@@ -186,7 +211,6 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 		log.Printf("[timing] fetchFresh: AI grouping done in %v — %d categories with %d groups total",
 			time.Since(t0).Round(time.Second), len(groups), grouping.CountCatGroups(groups))
 
-		// Assign stable group IDs
 		grouping.AssignGroupIDs(groups)
 
 		total := 0
