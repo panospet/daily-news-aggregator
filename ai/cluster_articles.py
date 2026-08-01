@@ -11,6 +11,7 @@ from fastembed import TextEmbedding
 from sklearn.cluster import AgglomerativeClustering
 import numpy as np
 from collections import defaultdict
+import concurrent.futures
 
 # Load config from .env or default values
 DB_HOST = os.getenv("MF_DB_HOST", "127.0.0.1")
@@ -207,15 +208,8 @@ def group_articles(articles):
 
         # Temporary topic: newest article's title
         temp_topic = cluster_arts[0]["title"]
-
-        # For multi-article clusters, name with Gemini
-        if len(cluster_arts) > 1:
-            topic = call_gemini_naming(temp_topic, cluster_arts)
-        else:
-            topic = temp_topic
-
         group_data = {
-            "topic": topic,
+            "topic": temp_topic,
             "articles": cluster_arts,
             "count": len(cluster_arts)
         }
@@ -225,6 +219,22 @@ def group_articles(articles):
     # Sort groups by count (largest first) within each category
     for cat in category_groups:
         category_groups[cat].sort(key=lambda g: g["count"], reverse=True)
+
+    # 5. Parallelize Gemini naming for multi-article clusters
+    clusters_to_name = []
+    for cat in category_groups:
+        for group in category_groups[cat]:
+            if group["count"] > 1:
+                clusters_to_name.append(group)
+    
+    if clusters_to_name and GEMINI_API_KEY:
+        def fetch_name(g):
+            temp_topic = g["topic"]
+            new_topic = call_gemini_naming(temp_topic, g["articles"])
+            g["topic"] = new_topic
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+            executor.map(fetch_name, clusters_to_name)
 
     # Build output in preferred order
     output = {
