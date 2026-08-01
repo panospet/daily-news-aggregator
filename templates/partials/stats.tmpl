@@ -2,8 +2,14 @@
 {{end}}
 
 {{define "stats-old"}}
-<div id="stats-tab" class="stats-bar" style="display:none">
-    <span class="stat-item">🤖 {{.Total}} articles</span>
-    <span class="stat-item">🕐 {{.Generated}}</span>
+<div id="stats-tab" class="header-stats">
+    <span class="stat-chip">
+        <span class="stat-chip-icon">🤖</span>
+        {{.Total}} articles
+    </span>
+    <span class="stat-chip">
+        <span class="stat-chip-icon">🕐</span>
+        {{.Generated}}
+    </span>
 </div>
 {{end}}

@@ -19,16 +19,16 @@
             {{$cat := .Category}}
             {{range $idx, $group := .Groups}}
             <div class="topic-card" id="topic-{{$idx}}">
-                <div class="topic-header" 
+                <div class="topic-header"
                      hx-post="/summarize"
                      hx-vals='{"category": "{{$cat}}", "group_id": "{{$group.GroupID}}", "group": "{{$idx}}"}'
                      hx-target="closest .topic-card"
                      hx-swap="outerHTML"
                      hx-indicator="#loading">
                     <div class="topic-title-row">
+                        <span class="topic-expand-icon">▼</span>
                         <span class="topic-count-badge">{{$group.Count}}</span>
                         <h3 class="topic-title">{{$group.Topic}}</h3>
-                        <span class="topic-expand-icon">▼</span>
                     </div>
                     <div class="topic-preview">
                         {{range uniqueFeeds $group.Articles}}
@@ -74,7 +74,14 @@
                         <span class="source-name">{{.Title}}</span>
                         <span class="source-arrow">→</span>
                     </a>
-                    <span class="source-meta">{{.Feed}}</span>
+                    <div class="source-meta-row">
+                        <span class="source-meta">{{.Feed}}</span>
+                        <button hx-post="/feedback" 
+                                hx-vals='{"category": "{{$.Category}}", "group_id": "{{$.GroupID}}", "irrelevant_url": "{{.URL}}"}' 
+                                hx-swap="outerHTML" 
+                                class="feedback-btn" 
+                                title="Mark as irrelevant">👎</button>
+                    </div>
                 </li>
                 {{end}}
             </ul>
@@ -104,7 +111,14 @@
                         <span class="source-name">{{.Title}}</span>
                         <span class="source-arrow">→</span>
                     </a>
-                    <span class="source-meta">{{.Feed}} · {{.TimeAgo}}</span>
+                    <div class="source-meta-row">
+                        <span class="source-meta">{{.Feed}} · {{.TimeAgo}}</span>
+                        <button hx-post="/feedback" 
+                                hx-vals='{"category": "{{$.Category}}", "group_id": "{{$.GroupID}}", "irrelevant_url": "{{.URL}}"}' 
+                                hx-swap="outerHTML" 
+                                class="feedback-btn" 
+                                title="Mark as irrelevant">👎</button>
+                    </div>
                 </li>
                 {{end}}
             </ul>

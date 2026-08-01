@@ -5,77 +5,174 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Miniflux AI Dashboard</title>
+    <meta name="description" content="AI-powered news dashboard with intelligent topic grouping and summaries">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script defer src="/static/htmx.min.js"></script>
     <script defer>
-        // Auto-refresh the articles every 10min, but only if no card is expanded
         document.addEventListener('DOMContentLoaded', function() {
+            // Auto-refresh articles every 10min (skip if a card is expanded)
             setInterval(function() {
                 if (document.querySelector('.topic-card.expanded')) return;
                 htmx.ajax('GET', '/', {target: '#articles', swap: 'innerHTML', indicator: '#loading'});
             }, 600000);
+            // Refresh stats every 60s
             setInterval(function() {
                 htmx.ajax('GET', '/stats', {target: '#stats-tab', swap: 'outerHTML'});
             }, 60000);
+        });
+
+        // Sidebar toggle (mobile)
+        function toggleSidebar() {
+            var sb = document.getElementById('sidebar');
+            var ov = document.getElementById('sidebar-overlay');
+            sb.classList.toggle('open');
+            if (sb.classList.contains('open')) {
+                ov.classList.add('visible');
+                ov.style.display = 'block';
+            } else {
+                ov.classList.remove('visible');
+                setTimeout(function() { ov.style.display = 'none'; }, 350);
+            }
+        }
+
+        // Theme toggle
+        function toggleTheme() {
+            var html = document.documentElement;
+            var next = html.dataset.theme === 'light' ? 'dark' : 'light';
+            html.dataset.theme = next;
+            var btn = document.getElementById('theme-btn-text');
+            if (btn) btn.textContent = next === 'light' ? 'Dark mode' : 'Light mode';
+        }
+
+        // Filter active state
+        document.addEventListener('htmx:afterSwap', function(e) {
+            if (e.detail.target && e.detail.target.id === 'articles') {
+                // Highlight active nav item
+                var trigger = e.detail.requestConfig && e.detail.requestConfig.elt;
+                if (trigger && trigger.classList && trigger.classList.contains('nav-item')) {
+                    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
+                    trigger.classList.add('active');
+                }
+            }
         });
     </script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body hx-headers='{"HX-Request": "true"}'>
-    <header class="top-bar">
-        <div class="container">
-            <div class="top-bar-inner">
-                <h1 class="logo">🤖 Miniflux AI</h1>
-                <span class="subtitle">AI ομαδοποίηση · {{.Total}} άρθρα</span>
-                <div class="top-bar-actions">
-                    <button class="theme-toggle" onclick="document.documentElement.dataset.theme=document.documentElement.dataset.theme==='light'?'dark':'light'" title="Toggle theme">🌓</button>
-                    <button class="refresh-btn" hx-get="/" hx-target="#articles" hx-indicator="#loading" hx-swap="innerHTML" title="Refresh">🔄</button>
+    <div class="app-layout">
+        <div class="bg-mesh-glow"></div>
+
+        <!-- Sidebar Overlay (mobile) -->
+        <div id="sidebar-overlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
+
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-brand">
+                    <span class="sidebar-logo">🤖</span>
+                    <span class="sidebar-title">Miniflux AI</span>
+                </div>
+                <div class="sidebar-subtitle">AI-grouped news · {{.Total}} articles</div>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-nav-label">Categories</div>
+                <ul class="nav-list">
+                    <li>
+                        <button class="nav-item active"
+                                hx-get="/filter?cat=all"
+                                hx-target="#articles"
+                                hx-push-url="true"
+                                hx-indicator="#loading"
+                                onclick="if(window.innerWidth<=768)toggleSidebar()">
+                            <span class="nav-icon">📋</span>
+                            <span class="nav-label">All Articles</span>
+                            <span class="nav-count">{{.Total}}</span>
+                        </button>
+                    </li>
+                    {{range .Categories}}
+                    <li>
+                        <button class="nav-item"
+                                hx-get="/filter?cat={{.Category}}"
+                                hx-target="#articles"
+                                hx-push-url="true"
+                                hx-indicator="#loading"
+                                onclick="if(window.innerWidth<=768)toggleSidebar()">
+                            <span class="nav-icon">{{catIcon .Category}}</span>
+                            <span class="nav-label">{{.Category}}</span>
+                            <span class="nav-count">{{.Count}}</span>
+                        </button>
+                    </li>
+                    {{end}}
+                </ul>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="theme-toggle-btn" onclick="toggleTheme()">
+                    <span>🌓</span>
+                    <span id="theme-btn-text">Light mode</span>
+                </button>
+                <div class="sidebar-footer-links">
+                    <a href="https://miniflux.app" target="_blank" rel="noopener">Miniflux</a>
+                    <a href="https://gemini.google.com" target="_blank" rel="noopener">Gemini AI</a>
+                    <a href="https://htmx.org" target="_blank" rel="noopener">HTMX</a>
+                    <a href="https://go.dev" target="_blank" rel="noopener">Go</a>
                 </div>
             </div>
-        </div>
-    </header>
+        </aside>
 
-    <main class="container" id="main-content">
-        {{ block "page" . }}
-        <section id="controls" class="controls">
-            <div class="search-box">
-                <input type="search" name="q" placeholder="Αναζήτηση άρθρων..." autocomplete="off"
-                       hx-get="/search"
-                       hx-trigger="input changed delay:300ms, search"
-                       hx-target="#articles"
-                       hx-push-url="false">
-                <span class="search-hint">Αναζήτηση σε τίτλους και πηγές</span>
+        <!-- Content Area -->
+        <div class="content-area">
+            {{ block "page" . }}
+            <header class="content-header">
+                <div class="content-header-inner">
+                    <button class="hamburger-btn" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
+                    <div class="search-wrapper">
+                        <span class="search-icon">🔍</span>
+                        <input type="search" name="q" class="search-input"
+                               placeholder="Search articles..."
+                               autocomplete="off"
+                               hx-get="/search"
+                               hx-trigger="input changed delay:300ms, search"
+                               hx-target="#articles"
+                               hx-push-url="false">
+                    </div>
+                    <div class="header-stats" id="stats-tab">
+                        <span class="stat-chip">
+                            <span class="stat-chip-icon">🤖</span>
+                            {{.Total}} articles
+                        </span>
+                        <span class="stat-chip">
+                            <span class="stat-chip-icon">🕐</span>
+                            {{.Generated}}
+                        </span>
+                    </div>
+                    <button class="refresh-btn"
+                            hx-get="/"
+                            hx-target="#articles"
+                            hx-indicator="#loading"
+                            hx-swap="innerHTML"
+                            title="Refresh">🔄</button>
+                </div>
+            </header>
+
+            <div id="loading" class="htmx-indicator loading-bar">
+                <div class="loading-bar-inner"></div>
             </div>
 
-            <div class="filter-tabs" id="filter-tabs">
-                <button class="filter-btn active" hx-get="/filter?cat=all" hx-target="#articles" hx-push-url="true" hx-indicator="#loading">
-                    📋 All <span class="count-badge">{{.Total}}</span>
-                </button>
-                {{range .Categories}}
-                <button class="filter-btn" hx-get="/filter?cat={{.Category}}" hx-target="#articles" hx-push-url="true" hx-indicator="#loading">
-                    {{catIcon .Category}} {{.Category}} <span class="count-badge">{{.Count}}</span>
-                </button>
-                {{end}}
-            </div>
+            <main class="main-content">
+                {{ template "articles" . }}
+            </main>
 
-            <div class="refresh-bar">
-                <span class="last-updated" id="last-updated">Ενημερώθηκε: {{.Generated}}</span>
-                <span id="stats-tab" class="inline-stats">🤖 {{.Total}} άρθρα σε {{len .Categories}} κατηγορίες</span>
-            </div>
-        </section>
-
-        <div id="loading" class="htmx-indicator loading-bar">
-            <div class="loading-bar-inner"></div>
+            <footer class="content-footer">
+                <p>Powered by Miniflux · Gemini AI · HTMX · Go</p>
+            </footer>
+            {{ end }}
         </div>
 
-        {{ template "articles" . }}
-        {{ end }}
-    </main>
-
-    <footer class="footer">
-        <div class="container">
-            <p>Powered by <a href="https://miniflux.app" target="_blank">Miniflux</a> · <a href="https://gemini.google.com" target="_blank">Gemini AI</a> · <a href="https://htmx.org" target="_blank">HTMX</a> · <a href="https://go.dev" target="_blank">Go</a></p>
-        </div>
-    </footer>
+    </div>
 </body>
 </html>
 {{end}}
