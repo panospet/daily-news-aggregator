@@ -25,11 +25,28 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
   - `ai_cache`: The fully clustered structure served once the AI service completes processing.
 - The Go backend safely falls back to `article_cache` if the AI service goes offline or is busy downloading models.
 
-### 4. Negative Feedback Loop
-- Added a "thumbs down" button on each article source within an expanded group.
-- Clicking the button silently triggers a POST request to `/feedback`.
-- This feedback logs the entire group cluster + the specific rejected article to a `negative_feedback` Postgres table.
-- This data allows us to manually review failing clusters and tweak distance thresholds or models in the future.
+### 4. Feedback Loop (Positive & Negative)
+- **Negative Feedback**: A "thumbs down" button exists on each article source within an expanded group.
+  - Clicking it silently triggers a POST request to `/feedback`, hiding the positive button.
+  - Logs the entire group cluster + the specific rejected article to a `negative_feedback` Postgres table.
+- **Positive Feedback**: A "thumbs up" button exists next to the group title (when expanded).
+  - Clicking it silently triggers a POST request to `/feedback/positive`, hiding the negative buttons.
+  - Logs the entire group cluster to a `positive_feedback` Postgres table.
+- **Handling Feedback (Agent Protocol)**: When a user reports a feedback entry (positive or negative), the agent MUST:
+  1. Fetch the latest feedback from the DB (`positive_feedback` or `negative_feedback`).
+  2. Use this as a testcase to evaluate clustering distance/threshold logic.
+  3. Write a temporary python script (e.g. `ai/test_threshold.py`) that mimics the distance logic in `ai/main.py` using `fastembed` for the affected articles.
+  4. Run the script inside the container (`docker exec -i miniflux-ai-service python3 < ai/test_threshold.py`) to compute the exact cosine distances.
+  5. Identify the correct `AI_DISTANCE_THRESHOLD` required to separate/group them properly and inform the user.
+
+### 5. Mark as Read
+- A group is marked as "read" when the user **both expands it AND requests a summary** (via the "✨ Summarize Topic" button).
+- Read groups appear grayed out (reduced opacity, desaturated via CSS `grayscale()` filter) with a small ✓ badge on the expand icon.
+- A "📬 Σήμανση ως μη αναγνωσμένο" (Mark Unread) button appears on read groups to revert them.
+- Read state is stored in `localStorage` keyed by `groupID:articleCount`, so if a new article is added to the group (changing the count), the group automatically becomes unread again.
+- Old read entries (>24 hours) are automatically cleaned up from localStorage.
+- Read state is restored on page load, HTMX partial swaps, and filter/search navigation.
+- Implementation is entirely client-side (no backend changes needed).
 
 ## Current State & Next Steps
 - The system is fully operational.
@@ -78,10 +95,8 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 | `internal/handler/handler.go` | HTTP routes: `GET /` (Home), `GET /filter`, `GET /search`, `GET /stats`, `POST /summarize`, `POST /feedback` |
 | `internal/handler/templates.go` | Template loading from embedded FS |
 | `internal/grouping/grouping.go` | `GroupArticles()` calls Python AI service. Falls back to flat grouping. Also has legacy Gemini-based grouping methods |
-| `internal/grouping/helpers.go` | Helper functions: `FlatGroupResult`, `BuildAICatGroupFlat`, `AssignGroupIDs`, `CountCatGroups` |
 | `internal/gemini/` | Gemini API client (used for summarization and legacy grouping prompts) |
 | `internal/summarize/` | AI topic summarization via Gemini |
-| `internal/tunnel/` | SSH tunnel management for remote DB access |
 | `embed.go` | Embeds `static/` and `templates/` into the Go binary |
 
 ### Python AI Service (`ai/`)
@@ -117,7 +132,7 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 
 | Env Var | Default | Where Used | Notes |
 |---------|---------|------------|-------|
-| `AI_DISTANCE_THRESHOLD` | `0.45` | `ai/main.py` | AgglomerativeClustering cosine distance threshold. Currently set to `0.55` in `.env`. Lower = stricter grouping |
+| `AI_DISTANCE_THRESHOLD` | `0.45` | `ai/main.py` | AgglomerativeClustering cosine distance threshold. Currently set to `0.50` in `.env`. After evaluating recent negative/positive feedback, we switched `linkage` from `complete` to `average` and lowered the threshold to `0.50`. This combination perfectly merges cohesive large clusters (like the 12-article Marfin group) while aggressively shattering unrelated news (like distinct sports or music articles). |
 | `GEMINI_API_KEY` | _(empty)_ | `ai/main.py`, Go backend | Used for topic naming (AI service) and summarization (Go) |
 | `MF_DB_HOST` | `127.0.0.1` | Go backend | Postgres host |
 | `MF_DB_PORT` | `5433` | Go backend | Currently `5435` in `.env` |
@@ -147,7 +162,7 @@ Defined in `ai/main.py` → `assign_category()` and `PREFERRED_ORDER`:
 1. **Extract text**: Strip HTML tags from article content, truncate to 1000 chars
 2. **Assign category**: Each article → one of 6 buckets based on Miniflux category + language detection
 3. **Embed**: For each bucket, embed `title + first 50 words of content` using fastembed (`batch_size=16`)
-4. **Cluster**: `AgglomerativeClustering(metric='cosine', linkage='complete', distance_threshold=0.55)`
+4. **Cluster**: `AgglomerativeClustering(metric='precomputed', linkage='average', distance_threshold=0.50)`
 5. **Name groups**: Multi-threaded Gemini calls to generate Greek topic names for groups with >1 article
 6. **Return**: JSON with `categories[].groups[].articles[]`
 
