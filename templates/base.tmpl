@@ -8,7 +8,8 @@
     <meta name="description" content="AI-powered news dashboard with intelligent topic grouping and summaries">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script defer src="/static/htmx.min.js"></script>
     <script defer>
         document.addEventListener('DOMContentLoaded', function() {
@@ -21,7 +22,131 @@
             setInterval(function() {
                 htmx.ajax('GET', '/stats', {target: '#stats-tab', swap: 'outerHTML'});
             }, 60000);
+
+            // ── Keyboard shortcuts ──
+            document.addEventListener('keydown', function(e) {
+                // "/" focuses the search bar
+                if (e.key === '/' && !isEditing(e)) {
+                    e.preventDefault();
+                    var input = document.querySelector('.search-input');
+                    if (input) input.focus();
+                }
+                // Escape collapses expanded cards or blurs search
+                if (e.key === 'Escape') {
+                    var expanded = document.querySelectorAll('.topic-card.expanded');
+                    if (expanded.length > 0) {
+                        expanded.forEach(function(card) {
+                            card.classList.remove('expanded');
+                        });
+                    } else {
+                        document.activeElement.blur();
+                    }
+                }
+            });
+
+            function isEditing(e) {
+                var tag = e.target.tagName;
+                return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
+            }
+
+
+            // ── Read state management ──
+            restoreReadState();
+
+            // ── Stagger card animations ──
+            assignCardIndices();
         });
+
+        // ── Read state: localStorage-based tracking ──
+        // Key format: "read:<groupID>:<articleCount>"
+        // A group is "read" when it has been both expanded AND summarized.
+
+        function getReadGroups() {
+            try {
+                return JSON.parse(localStorage.getItem('readGroups') || '{}');
+            } catch(e) { return {}; }
+        }
+
+        function saveReadGroups(obj) {
+            localStorage.setItem('readGroups', JSON.stringify(obj));
+        }
+
+        function toggleExpand(headerEl) {
+            var card = headerEl.closest('.topic-card');
+            card.classList.toggle('expanded');
+
+            // If collapsing, no action needed for read state tracking
+            if (!card.classList.contains('expanded')) return;
+
+            // Mark as expanded in a transient data attribute
+            card.dataset.wasExpanded = 'true';
+
+            // Check if this card was already summarized (HTMX-swapped summary card)
+            if (card.dataset.summarized === 'true') {
+                markAsRead(card);
+            }
+        }
+
+        function markAsRead(card) {
+            var gid = card.dataset.groupId;
+            var cnt = card.dataset.groupCount;
+            if (!gid) return;
+
+            var key = gid + ':' + cnt;
+            var groups = getReadGroups();
+            groups[key] = { groupId: gid, count: cnt, timestamp: Date.now() };
+            saveReadGroups(groups);
+
+            card.classList.add('topic-read');
+            // Show "mark unread" button
+            var unreadBtn = card.querySelector('.mark-unread-btn');
+            if (unreadBtn) unreadBtn.style.display = 'inline-flex';
+        }
+
+        function markUnread(card) {
+            var gid = card.dataset.groupId;
+            var cnt = card.dataset.groupCount;
+            if (!gid) return;
+
+            var key = gid + ':' + cnt;
+            var groups = getReadGroups();
+            delete groups[key];
+            saveReadGroups(groups);
+
+            card.classList.remove('topic-read');
+            // Hide "mark unread" button
+            var unreadBtn = card.querySelector('.mark-unread-btn');
+            if (unreadBtn) unreadBtn.style.display = 'none';
+        }
+
+        function restoreReadState() {
+            var groups = getReadGroups();
+            document.querySelectorAll('.topic-card[data-group-id]').forEach(function(card) {
+                var gid = card.dataset.groupId;
+                var cnt = card.dataset.groupCount;
+                var key = gid + ':' + cnt;
+                if (groups[key]) {
+                    card.classList.add('topic-read');
+                    var unreadBtn = card.querySelector('.mark-unread-btn');
+                    if (unreadBtn) unreadBtn.style.display = 'inline-flex';
+                }
+            });
+        }
+
+        // Clean up old entries (older than 24 hours) to avoid localStorage bloat
+        function cleanupReadState() {
+            var groups = getReadGroups();
+            var cutoff = Date.now() - (24 * 60 * 60 * 1000);
+            var changed = false;
+            for (var key in groups) {
+                if (groups[key].timestamp && groups[key].timestamp < cutoff) {
+                    delete groups[key];
+                    changed = true;
+                }
+            }
+            if (changed) saveReadGroups(groups);
+        }
+        cleanupReadState();
 
         // Sidebar toggle (mobile)
         function toggleSidebar() {
@@ -37,13 +162,30 @@
             }
         }
 
-        // Theme toggle
+        // Theme toggle with localStorage persistence
         function toggleTheme() {
             var html = document.documentElement;
             var next = html.dataset.theme === 'light' ? 'dark' : 'light';
             html.dataset.theme = next;
+            localStorage.setItem('theme', next);
             var btn = document.getElementById('theme-btn-text');
             if (btn) btn.textContent = next === 'light' ? 'Dark mode' : 'Light mode';
+            var icon = document.getElementById('theme-btn-icon');
+            if (icon) icon.textContent = next === 'light' ? '☀️' : '🌙';
+        }
+
+        // Restore saved theme
+        (function() {
+            var saved = localStorage.getItem('theme');
+            if (saved) {
+                document.documentElement.dataset.theme = saved;
+            }
+        })();
+
+        // Category section collapse/expand
+        function toggleCategory(el) {
+            var section = el.closest('.category-section');
+            if (section) section.classList.toggle('collapsed');
         }
 
         // Filter active state
@@ -55,12 +197,73 @@
                     document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
                     trigger.classList.add('active');
                 }
+                // Re-assign stagger indices for newly loaded cards
+                assignCardIndices();
+                // Restore read state for newly loaded cards
+                restoreReadState();
             }
         });
+
+        // Assign stagger animation indices to cards
+        function assignCardIndices() {
+            document.querySelectorAll('.topic-grid').forEach(function(grid) {
+                grid.querySelectorAll('.topic-card').forEach(function(card, i) {
+                    card.style.setProperty('--card-index', i);
+                });
+            });
+        }
+
+        // Smooth scroll to expanded card + mark-as-read on summary arrival
+        document.addEventListener('htmx:afterSettle', function(e) {
+            var card = e.detail.target;
+            if (card && card.classList && card.classList.contains('topic-card') && card.classList.contains('expanded')) {
+                setTimeout(function() {
+                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }, 100);
+
+                // When a summary HTMX response replaces the card, it arrives with data-summarized="true"
+                // The card is already expanded, so both conditions are met → mark as read
+                if (card.dataset.summarized === 'true') {
+                    markAsRead(card);
+                }
+            }
+        });
+
+        // ── Global Error Handling ──
+        document.addEventListener('htmx:responseError', function(e) {
+            showToast('Something went wrong. Please try again.', 'error');
+        });
+        document.addEventListener('htmx:sendError', function(e) {
+            showToast('Network error. Please check your connection.', 'error');
+        });
+        document.addEventListener('htmx:timeout', function(e) {
+            showToast('The request took too long. Please try again.', 'error');
+        });
+
+        function showToast(message, type) {
+            var container = document.getElementById('toast-container');
+            if (!container) return;
+            var toast = document.createElement('div');
+            toast.className = 'toast toast-' + (type || 'info');
+            toast.innerHTML = '<span>' + (type === 'error' ? '❌' : 'ℹ️') + '</span> ' + message;
+            container.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(function() { toast.classList.add('show'); }, 10);
+            
+            // Remove after 3.5s
+            setTimeout(function() {
+                toast.classList.remove('show');
+                setTimeout(function() { toast.remove(); }, 300);
+            }, 3500);
+        }
     </script>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body hx-headers='{"HX-Request": "true"}'>
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="toast-container"></div>
+
     <div class="app-layout">
         <div class="bg-mesh-glow"></div>
 
@@ -95,7 +298,7 @@
                     {{range .Categories}}
                     <li>
                         <button class="nav-item"
-                                hx-get="/filter?cat={{.Category}}"
+                                hx-get="/filter?cat={{.Category | urlquery}}"
                                 hx-target="#articles"
                                 hx-push-url="true"
                                 hx-indicator="#loading"
@@ -111,9 +314,13 @@
 
             <div class="sidebar-footer">
                 <button class="theme-toggle-btn" onclick="toggleTheme()">
-                    <span>🌓</span>
+                    <span id="theme-btn-icon">🌙</span>
                     <span id="theme-btn-text">Light mode</span>
                 </button>
+                <div class="sidebar-shortcuts">
+                    <span class="kbd-hint"><kbd>/</kbd> Search</span>
+                    <span class="kbd-hint"><kbd>Esc</kbd> Close</span>
+                </div>
                 <div class="sidebar-footer-links">
                     <a href="https://miniflux.app" target="_blank" rel="noopener">Miniflux</a>
                     <a href="https://gemini.google.com" target="_blank" rel="noopener">Gemini AI</a>
@@ -149,12 +356,7 @@
                             {{.Generated}}
                         </span>
                     </div>
-                    <button class="refresh-btn"
-                            hx-get="/"
-                            hx-target="#articles"
-                            hx-indicator="#loading"
-                            hx-swap="innerHTML"
-                            title="Refresh">🔄</button>
+                    <a href="/" class="refresh-btn" title="Homepage" style="text-decoration: none;">🏠</a>
                 </div>
             </header>
 
