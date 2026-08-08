@@ -9,7 +9,7 @@ import (
 
 func TestCall_NoAPIKey_ReturnsError(t *testing.T) {
 	c := &Client{HTTPClient: http.DefaultClient, APIKey: ""}
-	_, err := c.Call("hello")
+	_, err := c.Call("hello", nil)
 	if err == nil {
 		t.Error("expected error for empty API key")
 	}

@@ -17,8 +17,16 @@ type Client struct {
 
 // Caller is the interface for making Gemini API calls, enabling mock implementations in tests.
 type Caller interface {
-	Call(prompt string) (string, error)
+	Call(prompt string, schema *Schema) (string, error)
 	CallGrouping(prompt string) (string, error)
+}
+
+// ---------- request / response types ----------
+
+type Schema struct {
+	Type       string            `json:"type"`
+	Properties map[string]Schema `json:"properties,omitempty"`
+	Required   []string          `json:"required,omitempty"`
 }
 
 // ---------- request / response types ----------
@@ -40,6 +48,7 @@ type generateConfig struct {
 	Temperature     float64 `json:"temperature"`
 	MaxOutputTokens int     `json:"maxOutputTokens"`
 	ResponseMIME    string  `json:"responseMimeType"`
+	ResponseSchema  *Schema `json:"responseSchema,omitempty"`
 }
 
 type response struct {
@@ -52,17 +61,17 @@ type response struct {
 // ---------- public methods ----------
 
 // Call sends a prompt using gemini-2.5-flash-lite with 8K max tokens.
-func (c *Client) Call(prompt string) (string, error) {
-	return c.CallWithModel(prompt, "gemini-2.5-flash-lite", 8192)
+func (c *Client) Call(prompt string, schema *Schema) (string, error) {
+	return c.CallWithModel(prompt, "gemini-2.5-flash-lite", 8192, schema)
 }
 
 // CallGrouping sends a prompt using gemini-2.5-flash with 64K max tokens.
 func (c *Client) CallGrouping(prompt string) (string, error) {
-	return c.CallWithModel(prompt, "gemini-2.5-flash", 65536)
+	return c.CallWithModel(prompt, "gemini-2.5-flash", 65536, nil)
 }
 
 // CallWithModel sends a prompt to a specific Gemini model.
-func (c *Client) CallWithModel(prompt, model string, maxTokens int) (string, error) {
+func (c *Client) CallWithModel(prompt, model string, maxTokens int, schema *Schema) (string, error) {
 	if c.APIKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
@@ -75,6 +84,7 @@ func (c *Client) CallWithModel(prompt, model string, maxTokens int) (string, err
 			Temperature:     0.2,
 			MaxOutputTokens: maxTokens,
 			ResponseMIME:    "application/json",
+			ResponseSchema:  schema,
 		},
 	}
 

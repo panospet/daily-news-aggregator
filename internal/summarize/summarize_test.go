@@ -13,7 +13,7 @@ type mockGemini struct {
 	err      error
 }
 
-func (m *mockGemini) Call(prompt string) (string, error) {
+func (m *mockGemini) Call(prompt string, schema *gemini.Schema) (string, error) {
 	return m.response, m.err
 }
 
