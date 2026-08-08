@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -106,7 +107,10 @@ func (c *AICache) Get(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboa
 		}
 	}
 
-	return c.refreshBlocking(db, fetchFresh)
+	// If we reach here, the cache is completely empty.
+	// Trigger background refresh and return an error so the caller can serve fallback data.
+	go c.refresh(db, fetchFresh)
+	return nil, fmt.Errorf("ai cache empty, background refresh triggered")
 }
 
 func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) {

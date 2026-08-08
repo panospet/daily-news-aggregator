@@ -3,6 +3,7 @@ package handler
 import (
 	"database/sql"
 	"encoding/json"
+	"html/template"
 	"log"
 	"net/http"
 	"strconv"
@@ -27,6 +28,20 @@ type Server struct {
 	RetryFn    func(hours int) (*models.DashboardData, error)
 }
 
+// GetDataWithFallback fetches AI data, falling back to flat data if AI cache is empty or refreshing.
+func (s *Server) GetDataWithFallback() (*models.AIDashboardData, error) {
+	aiData, err := s.AICache.Get(s.DB, s.FetchFn)
+	if err != nil {
+		log.Printf("AI data error (falling back to flat): %v", err)
+		flat, flatErr := s.Cache.Get(nil, s.RetryFn)
+		if flatErr != nil {
+			return nil, flatErr
+		}
+		aiData = FlatToAI(flat)
+	}
+	return aiData, nil
+}
+
 // RegisterRoutes registers all HTTP routes on the given mux.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /{$}", s.Home)
@@ -35,6 +50,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /stats", s.Stats)
 	mux.HandleFunc("POST /summarize", s.HandleSummarize)
 	mux.HandleFunc("POST /feedback", s.HandleFeedback)
+	mux.HandleFunc("POST /feedback/positive", s.HandlePositiveFeedback)
 }
 
 // Home serves the main dashboard page.
@@ -42,15 +58,10 @@ func (s *Server) Home(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "HX-Request")
 	w.Header().Set("Cache-Control", "no-cache")
 
-	aiData, err := s.AICache.Get(s.DB, s.FetchFn)
+	aiData, err := s.GetDataWithFallback()
 	if err != nil {
-		log.Printf("AI data error (falling back to flat): %v", err)
-		flat, flatErr := s.Cache.Get(nil, s.RetryFn)
-		if flatErr != nil {
-			http.Error(w, "Data error", http.StatusInternalServerError)
-			return
-		}
-		aiData = FlatToAI(flat)
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
 	}
 
 	if r.Header.Get("HX-Request") == "true" {
@@ -65,7 +76,7 @@ func (s *Server) Home(w http.ResponseWriter, r *http.Request) {
 // CategoryFilter serves filtered articles by category.
 func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 	cat := r.URL.Query().Get("cat")
-	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	data, err := s.GetDataWithFallback()
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
@@ -85,6 +96,7 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	filtered.Generated = data.Generated
+	filtered.IsFallback = data.IsFallback
 
 	// HTMX request: return only the articles partial
 	if r.Header.Get("HX-Request") == "true" {
@@ -98,7 +110,7 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 // Search handles article search queries.
 func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
-	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	data, err := s.GetDataWithFallback()
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
@@ -242,13 +254,16 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		s.AICache.UpdateTopic(cat, groupIdx, fancyTopic)
 	}
 
+	formattedSummary := strings.ReplaceAll(summary.Summary, "\n", "<br>")
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = s.Tpl.Partial.ExecuteTemplate(w, "summary", map[string]interface{}{
 		"Topic":    targetTopic,
-		"Summary":  summary.Summary,
+		"Summary":  template.HTML(formattedSummary),
 		"Articles": targetGroup.Articles,
 		"Category": cat,
 		"GroupID":  targetGroup.GroupID,
+		"Tags":     targetGroup.Tags,
 	})
 }
 
@@ -311,6 +326,70 @@ func (s *Server) HandleFeedback(w http.ResponseWriter, r *http.Request) {
 		repo := &database.Repository{DB: s.DB}
 		if err := repo.SaveNegativeFeedback(cat, targetTopic, groupJsonBytes, irrelevantUrl); err != nil {
 			log.Printf("Failed to save negative feedback: %v", err)
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(`<span class="feedback-success">Feedback received ✅</span>`))
+}
+
+// HandlePositiveFeedback stores positive feedback for a topic group
+func (s *Server) HandlePositiveFeedback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cat := r.FormValue("category")
+	groupID := r.FormValue("group_id")
+
+	if cat == "" || groupID == "" {
+		http.Error(w, "Missing required parameters", http.StatusBadRequest)
+		return
+	}
+
+	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	if err != nil {
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
+	}
+
+	var targetGroup models.AIGroup
+	var targetTopic string
+	found := false
+
+	for _, cg := range data.Categories {
+		if !strings.EqualFold(cg.Category, cat) {
+			continue
+		}
+		if groupID != "" {
+			for _, g := range cg.Groups {
+				if g.GroupID == groupID {
+					targetGroup = g
+					targetTopic = g.Topic
+					found = true
+					break
+				}
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<span class="feedback-success">Feedback received ✅</span>`))
+		return
+	}
+
+	groupJsonBytes, err := json.Marshal(targetGroup)
+	if err != nil {
+		log.Printf("Failed to marshal group for positive feedback: %v", err)
+	} else {
+		repo := &database.Repository{DB: s.DB}
+		if err := repo.SavePositiveFeedback(cat, targetTopic, groupJsonBytes); err != nil {
+			log.Printf("Failed to save positive feedback: %v", err)
 		}
 	}
 

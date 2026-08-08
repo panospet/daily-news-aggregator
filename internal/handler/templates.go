@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/panospet/htmx-daily-news/internal/config"
 	"github.com/panospet/htmx-daily-news/internal/models"
 )
 
@@ -22,15 +21,35 @@ func LoadTemplates(embeddedFS fs.FS) (*TemplateSet, error) {
 		"upper": strings.ToUpper,
 		"catIcon": func(cat string) string {
 			switch {
-			case strings.Contains(cat, "μουσικ"):
+			case strings.Contains(cat, "Μουσική"):
 				return "🎵"
-			case strings.Contains(cat, "αθλητ"):
+			case strings.Contains(cat, "Αθλητισμός"):
 				return "⚽"
 			case strings.Contains(cat, "Κόσμος"):
 				return "🌍"
 			case strings.Contains(cat, "Ελλάδα"):
 				return "🇬🇷"
-			case strings.Contains(cat, "διάφορ"):
+			case strings.Contains(cat, "Πολιτική"):
+				return "🏛️"
+			case strings.Contains(cat, "Οικονομία"):
+				return "📈"
+			case strings.Contains(cat, "Κοινωνία"):
+				return "👥"
+			case strings.Contains(cat, "Έγκλημα"):
+				return "🚨"
+			case strings.Contains(cat, "Περιβάλλον"):
+				return "🌲"
+			case strings.Contains(cat, "Πόλεμος"):
+				return "⚔️"
+			case strings.Contains(cat, "Πολιτισμός"):
+				return "🎭"
+			case strings.Contains(cat, "Καιρός"):
+				return "☀️"
+			case strings.Contains(cat, "Τεχνολογία"):
+				return "💻"
+			case strings.Contains(cat, "Lifestyle"):
+				return "🛋️"
+			case strings.Contains(cat, "Διάφορα"):
 				return "🌀"
 			default:
 				return "📰"
@@ -78,15 +97,16 @@ func LoadTemplates(embeddedFS fs.FS) (*TemplateSet, error) {
 func FlatToAI(dd *models.DashboardData) *models.AIDashboardData {
 	var cats []models.AICategoryGroup
 	for _, cg := range dd.Categories {
-		displayName := config.CatDisplayName[cg.Category]
-		if displayName == "" {
-			displayName = cg.Category
-		}
-		acg := models.AICategoryGroup{Category: displayName, Count: cg.Count}
+		acg := models.AICategoryGroup{Category: cg.Category, Count: cg.Count}
 		for _, a := range cg.Articles {
 			acg.Groups = append(acg.Groups, models.AIGroup{Topic: a.Title, Articles: []models.Article{a}, Count: 1})
 		}
 		cats = append(cats, acg)
 	}
-	return &models.AIDashboardData{Categories: cats, Total: dd.Total, Generated: dd.Generated}
+	return &models.AIDashboardData{
+		Categories: cats,
+		Total:      dd.Total,
+		Generated:  dd.Generated,
+		IsFallback: true,
+	}
 }

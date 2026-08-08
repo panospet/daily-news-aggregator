@@ -5,16 +5,7 @@ import (
 	"strconv"
 )
 
-// CatDisplayName maps internal Miniflux category names to Greek display names.
-var CatDisplayName = map[string]string{
-	"international": "ειδήσεις Κόσμος",
-	"news":          "ειδήσεις Ελλάδα",
-	"sports":        "αθλητικές ειδήσεις",
-	"music":         "μουσικά νέα",
-	"politics":      "ειδήσεις Ελλάδα",
-	"random":        "διάφορες ειδήσεις",
-	"panionara":     "αθλητικές ειδήσεις",
-}
+
 
 // Config holds all application configuration values.
 type Config struct {
@@ -23,9 +14,6 @@ type Config struct {
 	DBName       string
 	DBUser       string
 	DBPass       string
-	SSHHost      string
-	SSHRemote    int
-	SSHTunnel    int
 	HTTPPort     int
 	GeminiAPIKey string
 }
@@ -38,9 +26,6 @@ func Load() Config {
 		DBName:       EnvStr("MF_DB_NAME", "miniflux"),
 		DBUser:       EnvStr("MF_DB_USER", "external_reader"),
 		DBPass:       EnvStr("MF_DB_PASSWORD", ""),
-		SSHHost:      EnvStr("MF_SSH_HOST", ""),
-		SSHRemote:    EnvInt("MF_SSH_REMOTE_PORT", 5435),
-		SSHTunnel:    EnvInt("MF_SSH_TUNNEL_PORT", 5433),
 		HTTPPort:     EnvInt("PORT", 8080),
 		GeminiAPIKey: EnvStr("GEMINI_API_KEY", ""),
 	}

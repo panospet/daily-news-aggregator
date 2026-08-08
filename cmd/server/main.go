@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -20,17 +19,10 @@ import (
 	"github.com/panospet/htmx-daily-news/internal/handler"
 	"github.com/panospet/htmx-daily-news/internal/models"
 	"github.com/panospet/htmx-daily-news/internal/summarize"
-	"github.com/panospet/htmx-daily-news/internal/tunnel"
 )
 
 func main() {
 	cfg := config.Load()
-
-	tun := &tunnel.Tunnel{}
-	if err := tun.Open(cfg); err != nil {
-		log.Fatalf("Failed to open SSH tunnel: %v", err)
-	}
-	defer tun.Close()
 
 	db, err := database.OpenDB(cfg)
 	if err != nil {
@@ -72,9 +64,9 @@ func main() {
 	groupSvc := &grouping.Service{Gemini: geminiClient}
 	summarizeSvc := &summarize.Service{Gemini: geminiClient}
 
-	// Build the retry function (handles tunnel reconnection)
+	// Build the retry function (used for DB queries)
 	retryFn := func(hours int) (*models.DashboardData, error) {
-		return dbQueryWithRetry(repo, tun, cfg, hours)
+		return repo.QueryArticles(hours)
 	}
 
 	fetchFn := cache.FetchFresh(db, repo, groupSvc, retryFn)
@@ -108,31 +100,4 @@ func main() {
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
-}
-
-// dbQueryWithRetry handles DB query retries with SSH tunnel reconnection.
-func dbQueryWithRetry(repo *database.Repository, tun *tunnel.Tunnel, cfg config.Config, hours int) (*models.DashboardData, error) {
-	data, err := repo.QueryArticles(hours)
-	if err != nil && (strings.Contains(err.Error(), "i/o timeout") || strings.Contains(err.Error(), "connection refused")) {
-		log.Printf("DB connection lost, reconnecting tunnel: %v", err)
-		tun.Close()
-		time.Sleep(1 * time.Second)
-		if tunErr := tun.Open(cfg); tunErr != nil {
-			log.Printf("Tunnel reopen failed: %v", tunErr)
-		} else if pingErr := repo.DB.Ping(); pingErr == nil {
-			log.Println("Tunnel reconnected, retrying query")
-			time.Sleep(2 * time.Second) // wait for SSH tunnel to be ready
-			data, err = repo.QueryArticles(hours)
-		}
-		// One more retry if still failing
-		if err != nil {
-			time.Sleep(3 * time.Second)
-			tun.Close()
-			if tunErr := tun.Open(cfg); tunErr == nil {
-				time.Sleep(2 * time.Second)
-				data, err = repo.QueryArticles(hours)
-			}
-		}
-	}
-	return data, err
 }

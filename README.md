@@ -9,7 +9,6 @@ A real-time news dashboard powered by Go + HTMX. Connects to a [Miniflux](https:
 - **Real-time search** — Debounced search across titles and sources (HTMX active search)
 - **Auto-refresh** — Automatically polls for new articles every 2 minutes
 - **Dark/Light theme** — Toggle with one click
-- **SSH tunnel** — Connect to remote Miniflux DB through an SSH tunnel
 - **Stale caching** — Serves cached data gracefully if DB is unreachable
 
 ## 🏗️ Tech Stack
@@ -42,9 +41,6 @@ cp .env.example .env
 | `MF_DB_NAME`      | Database name                        | `miniflux`      |
 | `MF_DB_USER`      | Database user                        | `external_reader` |
 | `MF_DB_PASSWORD`  | Database password                    | *(required)*    |
-| `MF_SSH_HOST`     | SSH host for tunnel (blank = direct) | *(optional)*    |
-| `MF_SSH_REMOTE_PORT` | Remote PostgreSQL port            | `5435`          |
-| `MF_SSH_TUNNEL_PORT`  | Local tunnel port                 | `5433`          |
 | `PORT`            | HTTP server port                     | `8080`          |
 
 ### 3. Run
@@ -62,7 +58,7 @@ Then open http://localhost:8080
 ## 🧠 Architecture
 
 ```
-┌──────────┐     SSH Tunnel      ┌─────────────┐
+┌──────────┐                     ┌─────────────┐
 │  Browser  │  ←─── HTTP ───→   │  Go Server  │
 │  (HTMX)   │                    │  :8080      │
 └──────────┘                    └──────┬──────┘
@@ -75,8 +71,7 @@ Then open http://localhost:8080
 ```
 
 The Go server:
-1. Opens an SSH tunnel to the Miniflux host (if configured)
-2. Queries the last 24 hours of articles
+1. Queries the last 24 hours of articles
 3. Groups them by category
 4. Caches results for 2 minutes
 5. Serves HTMX-powered partials for instant UI updates

@@ -35,6 +35,7 @@ type AIGroup struct {
 	Count    int       `json:"count"`
 	GroupID  string    `json:"group_id,omitempty"`
 	Category string    `json:"category,omitempty"`
+	Tags     []string  `json:"tags,omitempty"`
 }
 
 // AICategoryGroup collects topic groups under a display category.
@@ -49,6 +50,7 @@ type AIDashboardData struct {
 	Categories []AICategoryGroup `json:"categories"`
 	Total      int               `json:"total"`
 	Generated  string            `json:"generated"`
+	IsFallback bool              `json:"is_fallback,omitempty"`
 }
 
 // AISummaryResult contains the AI-generated summary for a topic group.

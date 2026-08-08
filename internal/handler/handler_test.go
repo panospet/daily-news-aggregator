@@ -32,9 +32,8 @@ func TestFlatToAI(t *testing.T) {
 	if len(result.Categories) != 1 {
 		t.Fatalf("expected 1 category, got %d", len(result.Categories))
 	}
-	// "news" maps to "ειδήσεις Ελλάδα" in CatDisplayName
-	if result.Categories[0].Category != "ειδήσεις Ελλάδα" {
-		t.Errorf("expected display name 'ειδήσεις Ελλάδα', got %q", result.Categories[0].Category)
+	if result.Categories[0].Category != "news" {
+		t.Errorf("expected display name 'news', got %q", result.Categories[0].Category)
 	}
 	if len(result.Categories[0].Groups) != 2 {
 		t.Errorf("expected 2 groups (one per article), got %d", len(result.Categories[0].Groups))

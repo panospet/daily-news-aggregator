@@ -39,6 +39,20 @@ func OpenDB(cfg config.Config) (*sql.DB, error) {
 		return nil, fmt.Errorf("create negative_feedback table: %w", err)
 	}
 
+	// Create positive feedback table if it doesn't exist
+	_, err = db.Exec(`
+		CREATE TABLE IF NOT EXISTS positive_feedback (
+			id SERIAL PRIMARY KEY,
+			category TEXT NOT NULL,
+			topic TEXT NOT NULL,
+			group_json JSONB NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+		)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("create positive_feedback table: %w", err)
+	}
+
 	return db, nil
 }
 
@@ -154,5 +168,14 @@ func (r *Repository) SaveNegativeFeedback(category, topic string, groupJson []by
 		INSERT INTO negative_feedback (category, topic, group_json, irrelevant_url)
 		VALUES ($1, $2, $3, $4)
 	`, category, topic, groupJson, irrelevantUrl)
+	return err
+}
+
+// SavePositiveFeedback stores feedback about a correctly grouped topic
+func (r *Repository) SavePositiveFeedback(category, topic string, groupJson []byte) error {
+	_, err := r.DB.Exec(`
+		INSERT INTO positive_feedback (category, topic, group_json)
+		VALUES ($1, $2, $3)
+	`, category, topic, groupJson)
 	return err
 }

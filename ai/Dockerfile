@@ -9,6 +9,7 @@ WORKDIR /app
 # Install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m spacy download el_core_news_md
 
 # Copy source code
 COPY main.py .

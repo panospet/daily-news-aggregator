@@ -79,15 +79,11 @@ func BuildAICatGroupFromParsed(cat string, arts []models.Article, displayName st
 }
 
 // FlatGroupResult creates a flat (non-AI) grouping respecting preferred order.
-func FlatGroupResult(catMap map[string][]models.Article, preferredOrder []string, catDisplayName map[string]string) []models.AICategoryGroup {
+func FlatGroupResult(catMap map[string][]models.Article, preferredOrder []string) []models.AICategoryGroup {
 	var result []models.AICategoryGroup
 	for _, cat := range preferredOrder {
 		if arts, ok := catMap[cat]; ok {
-			displayName := catDisplayName[cat]
-			if displayName == "" {
-				displayName = cat
-			}
-			acg := models.AICategoryGroup{Category: displayName, Count: len(arts)}
+			acg := models.AICategoryGroup{Category: cat, Count: len(arts)}
 			for _, a := range arts {
 				acg.Groups = append(acg.Groups, models.AIGroup{Topic: a.Title, Articles: []models.Article{a}, Count: 1})
 			}
@@ -96,11 +92,7 @@ func FlatGroupResult(catMap map[string][]models.Article, preferredOrder []string
 		}
 	}
 	for cat, arts := range catMap {
-		displayName := catDisplayName[cat]
-		if displayName == "" {
-			displayName = cat
-		}
-		acg := models.AICategoryGroup{Category: displayName, Count: len(arts)}
+		acg := models.AICategoryGroup{Category: cat, Count: len(arts)}
 		for _, a := range arts {
 			acg.Groups = append(acg.Groups, models.AIGroup{Topic: a.Title, Articles: []models.Article{a}, Count: 1})
 		}
