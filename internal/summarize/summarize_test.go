@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 // mockGemini is a test double for gemini.Caller.

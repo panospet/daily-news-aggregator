@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 func TestFlatToAI(t *testing.T) {

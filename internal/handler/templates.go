@@ -6,7 +6,7 @@ import (
 	"io/fs"
 	"strings"
 
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 // TemplateSet holds the parsed templates for full-page and partial rendering.

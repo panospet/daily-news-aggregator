@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 func TestArticleCache_Invalidate(t *testing.T) {

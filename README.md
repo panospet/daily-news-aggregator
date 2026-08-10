@@ -26,8 +26,8 @@ A real-time news dashboard powered by Go + HTMX. Connects to a [Miniflux](https:
 ### 1. Clone & configure
 
 ```bash
-git clone https://github.com/panospet/htmx-daily-news.git
-cd htmx-daily-news
+git clone https://github.com/panospet/daily-news-aggregator.git
+cd daily-news-aggregator
 cp .env.example .env
 # Edit .env with your Miniflux DB credentials
 ```
@@ -47,10 +47,10 @@ cp .env.example .env
 
 ```bash
 # Build
-go build -o htmx-daily-news .
+go build -o daily-news-aggregator .
 
 # Run
-./htmx-daily-news
+./daily-news-aggregator
 ```
 
 Then open http://localhost:8080

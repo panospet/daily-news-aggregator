@@ -7,7 +7,7 @@ import (
 	"log"
 	"sort"
 
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 // GroupBy partitions a slice by a key function.

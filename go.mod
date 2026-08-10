@@ -1,4 +1,4 @@
-module github.com/panospet/htmx-daily-news
+module github.com/panospet/daily-news-aggregator
 
 go 1.24
 

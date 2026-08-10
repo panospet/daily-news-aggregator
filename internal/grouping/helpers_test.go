@@ -3,7 +3,7 @@ package grouping
 import (
 	"testing"
 
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 func TestCountArticles(t *testing.T) {

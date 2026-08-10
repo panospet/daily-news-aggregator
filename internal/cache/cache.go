@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/panospet/htmx-daily-news/internal/database"
-	"github.com/panospet/htmx-daily-news/internal/grouping"
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/database"
+	"github.com/panospet/daily-news-aggregator/internal/grouping"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 	"github.com/redis/go-redis/v9"
 )
 

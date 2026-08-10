@@ -6,8 +6,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/panospet/htmx-daily-news/internal/gemini"
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/gemini"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 // Service handles AI-powered article summarization.

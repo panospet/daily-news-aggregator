@@ -10,15 +10,15 @@ import (
 	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
 
-	htmxdailynews "github.com/panospet/htmx-daily-news"
-	"github.com/panospet/htmx-daily-news/internal/cache"
-	"github.com/panospet/htmx-daily-news/internal/config"
-	"github.com/panospet/htmx-daily-news/internal/database"
-	"github.com/panospet/htmx-daily-news/internal/gemini"
-	"github.com/panospet/htmx-daily-news/internal/grouping"
-	"github.com/panospet/htmx-daily-news/internal/handler"
-	"github.com/panospet/htmx-daily-news/internal/models"
-	"github.com/panospet/htmx-daily-news/internal/summarize"
+	htmxdailynews "github.com/panospet/daily-news-aggregator"
+	"github.com/panospet/daily-news-aggregator/internal/cache"
+	"github.com/panospet/daily-news-aggregator/internal/config"
+	"github.com/panospet/daily-news-aggregator/internal/database"
+	"github.com/panospet/daily-news-aggregator/internal/gemini"
+	"github.com/panospet/daily-news-aggregator/internal/grouping"
+	"github.com/panospet/daily-news-aggregator/internal/handler"
+	"github.com/panospet/daily-news-aggregator/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/summarize"
 )
 
 func main() {

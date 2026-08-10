@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/panospet/htmx-daily-news/internal/config"
-	"github.com/panospet/htmx-daily-news/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/config"
+	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 // OpenDB creates a database connection pool using the given configuration.

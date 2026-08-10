@@ -9,11 +9,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/panospet/htmx-daily-news/internal/cache"
-	"github.com/panospet/htmx-daily-news/internal/config"
-	"github.com/panospet/htmx-daily-news/internal/database"
-	"github.com/panospet/htmx-daily-news/internal/models"
-	"github.com/panospet/htmx-daily-news/internal/summarize"
+	"github.com/panospet/daily-news-aggregator/internal/cache"
+	"github.com/panospet/daily-news-aggregator/internal/config"
+	"github.com/panospet/daily-news-aggregator/internal/database"
+	"github.com/panospet/daily-news-aggregator/internal/models"
+	"github.com/panospet/daily-news-aggregator/internal/summarize"
 )
 
 // Server holds all dependencies for HTTP handlers.
