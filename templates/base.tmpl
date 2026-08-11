@@ -214,17 +214,14 @@
         }
 
         // Smooth scroll to expanded card + mark-as-read on summary arrival
-        document.addEventListener('htmx:afterSettle', function(e) {
-            var card = e.detail.target;
+        document.addEventListener('htmx:load', function(e) {
+            var card = e.detail.elt;
             if (card && card.classList && card.classList.contains('topic-card') && card.classList.contains('expanded')) {
-                setTimeout(function() {
-                    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                }, 100);
-
-                // When a summary HTMX response replaces the card, it arrives with data-summarized="true"
-                // The card is already expanded, so both conditions are met → mark as read
                 if (card.dataset.summarized === 'true') {
                     markAsRead(card);
+                    setTimeout(function() {
+                        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                    }, 100);
                 }
             }
         });
