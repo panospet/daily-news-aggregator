@@ -25,3 +25,8 @@ daily-news-aggregator-bin
 # OS
 .DS_Store
 Thumbs.db
+
+# Scratch and test data
+feedback.txt
+*.json
+htmx-daily-news*
