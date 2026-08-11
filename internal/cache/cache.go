@@ -8,6 +8,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/panospet/daily-news-aggregator/internal/database"
@@ -74,6 +75,7 @@ type AICache struct {
 	client       *redis.Client
 	interval     time.Duration
 	refreshMutex sync.Mutex
+	refreshing   atomic.Bool
 }
 
 func NewAICache(client *redis.Client, interval time.Duration) *AICache {
@@ -114,10 +116,10 @@ func (c *AICache) Get(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboa
 }
 
 func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) {
-	if !c.refreshMutex.TryLock() {
+	if !c.refreshing.CompareAndSwap(false, true) {
 		return
 	}
-	defer c.refreshMutex.Unlock()
+	defer c.refreshing.Store(false)
 
 	ctx := context.Background()
 	val, err := c.client.Get(ctx, "ai_cache").Result()
@@ -139,7 +141,11 @@ func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDas
 
 	wrapper := RedisWrapper[*models.AIDashboardData]{Data: newData, Ts: time.Now()}
 	bytes, _ := json.Marshal(wrapper)
+	
+	c.refreshMutex.Lock()
 	c.client.Set(ctx, "ai_cache", bytes, 0)
+	c.refreshMutex.Unlock()
+	
 	log.Printf("AI cache refreshed — %d articles in %d categories", newData.Total, len(newData.Categories))
 }
 
