@@ -34,8 +34,8 @@
                         <span class="topic-expand-icon">▼</span>
                         <span class="topic-count-badge">{{$group.Count}}</span>
                         <h3 class="topic-title">{{$group.Topic}}</h3>
-                        <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Σήμανση ως μη αναγνωσμένο">
-                            📬 Αδιάβαστο
+                        <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Mark unread">
+                            📬 Mark unread
                         </button>
                     </div>
                     <div class="topic-preview">
@@ -100,8 +100,8 @@
         <div class="topic-title-row">
             <span class="topic-expand-icon">▼</span>
             <h3 class="topic-title">{{.Topic}}</h3>
-            <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Σήμανση ως μη αναγνωσμένο">
-                📬 Αδιάβαστο
+            <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Mark unread">
+                📬 Mark unread
             </button>
             <button hx-post="/feedback/positive" 
                     hx-vals='{"category": "{{.Category}}", "group_id": "{{.GroupID}}"}' 
@@ -153,8 +153,8 @@
         <div class="topic-title-row">
             <span class="topic-expand-icon">▼</span>
             <h3 class="topic-title">{{.Topic}}</h3>
-            <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Σήμανση ως μη αναγνωσμένο">
-                📬 Αδιάβαστο
+            <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Mark unread">
+                📬 Mark unread
             </button>
             <button hx-post="/feedback/positive" 
                     hx-vals='{"category": "{{.Category}}", "group_id": "{{.GroupID}}"}' 
