@@ -1162,7 +1162,6 @@ a:hover { color: var(--accent-hover); }
 @media (max-width: 480px) {
     .search-wrapper { max-width: none; }
     .stat-chip { display: none; }
-    .topic-preview { display: none; }
     .sidebar-shortcuts { display: none; }
 }
 
