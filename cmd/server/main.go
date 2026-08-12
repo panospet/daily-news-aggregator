@@ -23,10 +23,6 @@ import (
 
 func basicAuthMiddleware(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if cfg.AuthUsername == "" || cfg.AuthPassword == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
 		user, pass, ok := r.BasicAuth()
 		if !ok || user != cfg.AuthUsername || pass != cfg.AuthPassword {
 			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
@@ -58,6 +54,10 @@ func main() {
 
 	if cfg.GeminiAPIKey == "" {
 		log.Println("WARNING: GEMINI_API_KEY not set — AI features disabled")
+	}
+
+	if cfg.AuthUsername == "" || cfg.AuthPassword == "" {
+		log.Fatal("FATAL: AUTH_USERNAME and AUTH_PASSWORD must be set in the environment")
 	}
 
 	// HTTP client with higher concurrent connection limits for parallel Gemini calls
