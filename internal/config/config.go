@@ -30,8 +30,8 @@ func Load() Config {
 		DBPass:       EnvStr("MF_DB_PASSWORD", ""),
 		HTTPPort:     EnvInt("PORT", 8080),
 		GeminiAPIKey: EnvStr("GEMINI_API_KEY", ""),
-		AuthUsername: EnvStr("AUTH_USERNAME", "panos"),
-		AuthPassword: EnvStr("AUTH_PASSWORD", "Cinana12!"),
+		AuthUsername: EnvStr("AUTH_USERNAME", ""),
+		AuthPassword: EnvStr("AUTH_PASSWORD", ""),
 	}
 }
 
