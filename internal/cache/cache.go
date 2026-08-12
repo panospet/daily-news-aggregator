@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -224,10 +225,32 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 		grouping.AssignGroupIDs(groups)
 
 		total := 0
-		for _, g := range groups {
-			total += g.Count
+		tagFreq := make(map[string]int)
+		for _, catGrp := range groups {
+			total += catGrp.Count
+			for _, grp := range catGrp.Groups {
+				for _, tag := range grp.Tags {
+					tagFreq[tag]++
+				}
+			}
 		}
 
-		return &models.AIDashboardData{Categories: groups, Total: total, Generated: time.Now().Format("15:04:05")}, nil
+		var topTags []models.TagCount
+		for tag, count := range tagFreq {
+			topTags = append(topTags, models.TagCount{Tag: tag, Count: count})
+		}
+		sort.Slice(topTags, func(i, j int) bool {
+			if topTags[i].Count == topTags[j].Count {
+				return topTags[i].Tag < topTags[j].Tag
+			}
+			return topTags[i].Count > topTags[j].Count
+		})
+
+		return &models.AIDashboardData{
+			Categories: groups,
+			Total:      total,
+			Generated:  time.Now().Format("15:04:05"),
+			TopTags:    topTags,
+		}, nil
 	}
 }

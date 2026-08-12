@@ -307,6 +307,26 @@
                     </li>
                     {{end}}
                 </ul>
+                
+                {{if .TopTags}}
+                <div class="sidebar-nav-label" style="margin-top: 16px;">Hashtags</div>
+                <ul class="nav-list">
+                    {{range .TopTags}}
+                    <li>
+                        <button class="nav-item"
+                                hx-get="/search?q=%23{{.Tag | urlquery}}"
+                                hx-target="#articles"
+                                hx-push-url="false"
+                                hx-indicator="#loading"
+                                onclick="if(window.innerWidth<=768)toggleSidebar(); document.querySelector('.search-input').value = '#{{.Tag}}';">
+                            <span class="nav-icon">#</span>
+                            <span class="nav-label">{{.Tag}}</span>
+                            <span class="nav-count">{{.Count}}</span>
+                        </button>
+                    </li>
+                    {{end}}
+                </ul>
+                {{end}}
             </nav>
 
             <div class="sidebar-footer">

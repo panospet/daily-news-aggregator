@@ -97,6 +97,7 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 	}
 	filtered.Generated = data.Generated
 	filtered.IsFallback = data.IsFallback
+	filtered.TopTags = data.TopTags
 
 	// HTMX request: return only the articles partial
 	if r.Header.Get("HX-Request") == "true" {
@@ -128,12 +129,21 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 
 	var filtered models.AIDashboardData
 	filtered.Generated = data.Generated
+	filtered.TopTags = data.TopTags
 	for _, g := range data.Categories {
 		var matchedGroups []models.AIGroup
 		for _, grp := range g.Groups {
+			tagMatched := false
+			for _, t := range grp.Tags {
+				if strings.Contains(strings.ToLower("#"+t), q) || strings.Contains(strings.ToLower(t), q) {
+					tagMatched = true
+					break
+				}
+			}
+
 			var matched []models.Article
 			for _, a := range grp.Articles {
-				if strings.Contains(strings.ToLower(a.Title), q) ||
+				if tagMatched || strings.Contains(strings.ToLower(a.Title), q) ||
 					strings.Contains(strings.ToLower(a.Feed), q) {
 					matched = append(matched, a)
 				}

@@ -45,12 +45,19 @@ type AICategoryGroup struct {
 	Count    int       `json:"count"`
 }
 
+// TagCount represents a tag and its frequency.
+type TagCount struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
 // AIDashboardData is the AI-grouped view of all articles.
 type AIDashboardData struct {
 	Categories []AICategoryGroup `json:"categories"`
 	Total      int               `json:"total"`
 	Generated  string            `json:"generated"`
 	IsFallback bool              `json:"is_fallback,omitempty"`
+	TopTags    []TagCount        `json:"top_tags,omitempty"`
 }
 
 // AISummaryResult contains the AI-generated summary for a topic group.
