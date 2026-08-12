@@ -1163,6 +1163,7 @@ a:hover { color: var(--accent-hover); }
     .search-wrapper { max-width: none; }
     .stat-chip { display: none; }
     .sidebar-shortcuts { display: none; }
+    .topic-card:not(.expanded) .topic-preview { display: none; }
 }
 
 /* ═══════════════ TOAST NOTIFICATIONS ═══════════════ */
