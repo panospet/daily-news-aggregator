@@ -16,6 +16,8 @@ type Config struct {
 	DBPass       string
 	HTTPPort     int
 	GeminiAPIKey string
+	AuthUsername string
+	AuthPassword string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -28,6 +30,8 @@ func Load() Config {
 		DBPass:       EnvStr("MF_DB_PASSWORD", ""),
 		HTTPPort:     EnvInt("PORT", 8080),
 		GeminiAPIKey: EnvStr("GEMINI_API_KEY", ""),
+		AuthUsername: EnvStr("AUTH_USERNAME", "panos"),
+		AuthPassword: EnvStr("AUTH_PASSWORD", "Cinana12!"),
 	}
 }
 

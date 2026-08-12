@@ -21,6 +21,22 @@ import (
 	"github.com/panospet/daily-news-aggregator/internal/summarize"
 )
 
+func basicAuthMiddleware(cfg config.Config, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if cfg.AuthUsername == "" || cfg.AuthPassword == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, pass, ok := r.BasicAuth()
+		if !ok || user != cfg.AuthUsername || pass != cfg.AuthPassword {
+			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	cfg := config.Load()
 
@@ -97,7 +113,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	log.Printf("🤖 Miniflux AI Dashboard starting on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	if err := http.ListenAndServe(addr, basicAuthMiddleware(cfg, mux)); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }
