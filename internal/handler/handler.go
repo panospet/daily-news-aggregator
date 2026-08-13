@@ -155,8 +155,6 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 		}
 		if len(matchedGroups) > 0 {
 			filtered.Categories = append(filtered.Categories, models.AICategoryGroup{Category: g.Category, Groups: matchedGroups, Count: len(matchedGroups)})
-		} else {
-			filtered.Categories = append(filtered.Categories, models.AICategoryGroup{Category: g.Category, Count: 0})
 		}
 	}
 
