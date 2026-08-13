@@ -1,397 +1,277 @@
 {{define "base"}}
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en" data-theme="dark">
 <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Miniflux AI Dashboard</title>
-    <meta name="description" content="AI-powered news dashboard with intelligent topic grouping and summaries">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    <script defer src="/static/htmx.min.js"></script>
-    <script defer>
-        document.addEventListener('DOMContentLoaded', function() {
-            // Auto-refresh articles every 10min (skip if a card is expanded)
-            setInterval(function() {
-                if (document.querySelector('.topic-card.expanded')) return;
-                htmx.ajax('GET', '/', {target: '#articles', swap: 'innerHTML', indicator: '#loading'});
-            }, 600000);
-            // Refresh stats every 60s
-            setInterval(function() {
-                htmx.ajax('GET', '/stats', {target: '#stats-tab', swap: 'outerHTML'});
-            }, 60000);
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>News Flow</title>
+<meta name="description" content="AI-powered news flow dashboard">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="/static/htmx.min.js" defer></script>
+<script>
+(function() {
+  var saved = localStorage.getItem('flow-theme') || 'dark';
+  document.documentElement.dataset.theme = saved;
+})();
 
-            // ── Keyboard shortcuts ──
-            document.addEventListener('keydown', function(e) {
-                // "/" focuses the search bar
-                if (e.key === '/' && !isEditing(e)) {
-                    e.preventDefault();
-                    var input = document.querySelector('.search-input');
-                    if (input) input.focus();
-                }
-                // Escape collapses expanded cards or blurs search
-                if (e.key === 'Escape') {
-                    var expanded = document.querySelectorAll('.topic-card.expanded');
-                    if (expanded.length > 0) {
-                        expanded.forEach(function(card) {
-                            card.classList.remove('expanded');
-                        });
-                    } else {
-                        document.activeElement.blur();
-                    }
-                }
-            });
+document.addEventListener('DOMContentLoaded', function() {
+  restoreReadState();
+  setInterval(function() {
+    if (!document.querySelector('.card--open')) {
+      htmx.ajax('GET', '/', {target:'#stream', swap:'innerHTML'});
+    }
+  }, 600000);
+});
 
-            function isEditing(e) {
-                var tag = e.target.tagName;
-                return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || e.target.isContentEditable;
-            }
+function toggleCard(el) {
+  var card = el.closest('.card');
+  card.classList.toggle('card--open');
+  if (card.classList.contains('card--open') && card.dataset.summarized === 'true') {
+    markAsRead(card);
+  }
+}
 
+function markAsRead(card) {
+  var gid = card.dataset.groupId;
+  var cnt = card.dataset.groupCount;
+  if (!gid) return;
+  var key = gid + ':' + cnt;
+  var groups = JSON.parse(localStorage.getItem('flow-read') || '{}');
+  groups[key] = { t: Date.now() };
+  localStorage.setItem('flow-read', JSON.stringify(groups));
+  card.classList.add('card--read');
+  var btn = card.querySelector('.btn-unread');
+  if (btn) btn.style.display = 'inline-flex';
+}
 
-            // ── Read state management ──
-            restoreReadState();
+function markUnread(card) {
+  var gid = card.dataset.groupId;
+  var cnt = card.dataset.groupCount;
+  if (!gid) return;
+  var key = gid + ':' + cnt;
+  var groups = JSON.parse(localStorage.getItem('flow-read') || '{}');
+  delete groups[key];
+  localStorage.setItem('flow-read', JSON.stringify(groups));
+  card.classList.remove('card--read');
+  var btn = card.querySelector('.btn-unread');
+  if (btn) btn.style.display = 'none';
+}
 
-            // ── Stagger card animations ──
-            assignCardIndices();
-        });
+function restoreReadState() {
+  var groups = JSON.parse(localStorage.getItem('flow-read') || '{}');
+  document.querySelectorAll('.card[data-group-id]').forEach(function(card) {
+    var gid = card.dataset.groupId;
+    var cnt = card.dataset.groupCount;
+    if (groups[gid + ':' + cnt]) {
+      card.classList.add('card--read');
+      var btn = card.querySelector('.btn-unread');
+      if (btn) btn.style.display = 'inline-flex';
+    }
+  });
+}
 
-        // ── Read state: localStorage-based tracking ──
-        // Key format: "read:<groupID>:<articleCount>"
-        // A group is "read" when it has been both expanded AND summarized.
+function toggleMenu() {
+  document.getElementById('panel').classList.toggle('panel--open');
+}
+function setTheme(mode) {
+  document.documentElement.dataset.theme = mode;
+  localStorage.setItem('flow-theme', mode);
+}
+function showToast(msg, type) {
+  var c = document.getElementById('toast-container');
+  if (!c) return;
+  var t = document.createElement('div');
+  t.className = 'toast toast--' + (type || 'info');
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(function() { t.classList.add('toast--show'); }, 10);
+  setTimeout(function() { t.classList.remove('toast--show'); setTimeout(function() { t.remove(); }, 300); }, 3500);
+}
 
-        function getReadGroups() {
-            try {
-                return JSON.parse(localStorage.getItem('readGroups') || '{}');
-            } catch(e) { return {}; }
-        }
+document.addEventListener('keydown', function(e) {
+  if (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) {
+    e.preventDefault(); document.querySelector('.search input')?.focus();
+  }
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.card--open').forEach(function(x) { x.classList.remove('card--open'); });
+    document.getElementById('panel')?.classList.remove('panel--open');
+  }
+});
 
-        function saveReadGroups(obj) {
-            localStorage.setItem('readGroups', JSON.stringify(obj));
-        }
+document.addEventListener('htmx:afterSwap', function(e) {
+  if (e.detail.target && e.detail.target.id === 'stream') restoreReadState();
+});
+document.addEventListener('htmx:load', function(e) {
+  var card = e.detail.elt;
+  if (card && card.classList && card.classList.contains('card') && card.classList.contains('card--open') && card.dataset.summarized === 'true') {
+    markAsRead(card);
+    setTimeout(function() { card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100);
+  }
+});
+document.addEventListener('htmx:responseError', function() { showToast('Something went wrong. Please try again.', 'error'); });
+document.addEventListener('htmx:sendError', function() { showToast('Network error. Please check your connection.', 'error'); });
+document.addEventListener('htmx:timeout', function() { showToast('Request timed out. Please try again.', 'error'); });
+</script>
+<style>
+:root { color-scheme: dark; --bg:#07090d; --panel:#0d1117; --card:#10151d; --card-open:#151b25; --line:#1f2733; --text:#e6edf3; --muted:#8b949e; --dim:#6e7681; --acc:#58a6ff; --acc2:#bc8cff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --mono:'IBM Plex Mono',monospace; --sans:'Space Grotesk',system-ui,sans-serif; }
+html[data-theme="light"] { color-scheme: light; --bg:#f6f8fa; --panel:#ffffff; --card:#ffffff; --card-open:#eaeef2; --line:#d0d7de; --text:#1f2328; --muted:#57606a; --dim:#6e7781; }
+* { box-sizing:border-box; margin:0; padding:0; }
+body { font-family:var(--sans); background:var(--bg); color:var(--text); line-height:1.6; }
+a { color:inherit; text-decoration:none; }
+button { font:inherit; color:inherit; background:none; border:none; cursor:pointer; }
 
-        function toggleExpand(headerEl) {
-            var card = headerEl.closest('.topic-card');
-            card.classList.toggle('expanded');
+.layout { display:grid; grid-template-columns:240px 1fr; min-height:100vh; }
+.panel { background:var(--panel); border-right:1px solid var(--line); padding:24px 16px; position:sticky; top:0; height:100vh; overflow-y:auto; }
+.panel__brand { font-weight:700; font-size:20px; letter-spacing:-0.03em; margin-bottom:28px; }
+.panel__section { margin-bottom:20px; }
+.panel__label { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:0.1em; color:var(--dim); margin-bottom:10px; }
+.nav { list-style:none; }
+.nav__item { display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:6px; font-size:13px; color:var(--muted); transition:0.15s; }
+.nav__item:hover, .nav__item--active { background:var(--card-open); color:var(--text); }
+.nav__count { margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--dim); }
+.nav__icon { width:16px; text-align:center; }
+.panel__footer { margin-top:auto; padding-top:20px; border-top:1px solid var(--line); font-family:var(--mono); font-size:11px; color:var(--dim); }
+.theme-row { display:flex; gap:8px; margin-bottom:12px; }
+.theme-btn { padding:6px 10px; border:1px solid var(--line); border-radius:6px; font-size:12px; color:var(--muted); }
+.theme-btn:hover { border-color:var(--acc); color:var(--text); }
 
-            // If collapsing, no action needed for read state tracking
-            if (!card.classList.contains('expanded')) return;
+.main { padding:0 32px 40px; }
+.topbar { display:flex; align-items:center; gap:16px; padding:18px 0; border-bottom:1px solid var(--line); margin-bottom:24px; }
+.menu-btn { display:none; font-size:20px; }
+.search { flex:1; max-width:480px; position:relative; }
+.search input { width:100%; padding:10px 14px 10px 36px; background:var(--card); border:1px solid var(--line); border-radius:8px; color:var(--text); font-size:13px; }
+.search input:focus { outline:none; border-color:var(--acc); }
+.search::before { content:'⌕'; position:absolute; left:12px; top:50%; transform:translateY(-50%); color:var(--dim); font-size:16px; }
+.meta { margin-left:auto; display:flex; gap:16px; font-family:var(--mono); font-size:11px; color:var(--dim); }
+.meta b { color:var(--text); font-weight:500; }
 
-            // Mark as expanded in a transient data attribute
-            card.dataset.wasExpanded = 'true';
+.header { margin-bottom:32px; }
+.header__eyebrow { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:0.12em; color:var(--acc); margin-bottom:8px; }
+.header h1 { font-size:32px; font-weight:600; letter-spacing:-0.02em; margin-bottom:6px; }
+.header p { color:var(--muted); font-size:14px; max-width:520px; }
 
-            // Check if this card was already summarized (HTMX-swapped summary card)
-            if (card.dataset.summarized === 'true') {
-                markAsRead(card);
-            }
-        }
+.cat { margin-bottom:36px; }
+.cat__head { display:flex; align-items:center; gap:12px; padding:10px 0; border-bottom:1px solid var(--line); margin-bottom:16px; cursor:pointer; }
+.cat__head:hover .cat__name { color:var(--acc); }
+.cat__icon { font-size:16px; }
+.cat__name { font-size:15px; font-weight:600; flex:1; }
+.cat__count { font-family:var(--mono); font-size:11px; color:var(--dim); }
+.cat__arrow { color:var(--dim); font-size:12px; transition:0.2s; }
+.cat--closed .cat__arrow { transform:rotate(-90deg); }
+.cat--closed .cards, .cat--closed .sentinel { display:none; }
 
-        function markAsRead(card) {
-            var gid = card.dataset.groupId;
-            var cnt = card.dataset.groupCount;
-            if (!gid) return;
+.cards { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:12px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden; transition:0.2s; }
+.card:hover { border-color:#30363d; }
+.card--open { grid-column:1/-1; border-color:var(--acc); background:var(--card-open); }
+.card--read { opacity:0.6; }
+.card--read .card__title { text-decoration:line-through; }
+.card__head { display:flex; align-items:center; gap:10px; padding:14px 16px; cursor:pointer; }
+.card__num { font-family:var(--mono); font-size:10px; color:var(--dim); width:20px; }
+.card__title { font-size:13px; font-weight:500; flex:1; line-height:1.4; }
+.card__cnt { font-family:var(--mono); font-size:10px; background:var(--card-open); padding:2px 6px; border-radius:4px; color:var(--muted); }
+.card--open .card__cnt { background:var(--acc); color:#000; }
+.card__body { display:none; padding:0 16px 16px; border-top:1px solid var(--line); }
+.card--open .card__body { display:block; padding-top:14px; }
+.card__tags { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+.tag { font-family:var(--mono); font-size:10px; padding:3px 6px; border-radius:4px; background:var(--card-open); color:var(--acc2); border:1px solid var(--line); }
+.tag--src { color:var(--muted); }
+.btn-sum { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; background:var(--acc); color:#000; font-size:12px; font-weight:600; border-radius:6px; margin-bottom:16px; position:relative; }
+.btn-sum:hover { filter:brightness(1.1); }
+.btn-sum__spinner { display:none; width:14px; height:14px; border:2px solid transparent; border-top-color:#000; border-radius:50%; animation:spin 0.8s linear infinite; }
+.htmx-request .btn-sum__text { opacity:0.5; }
+.htmx-request .btn-sum__spinner { display:block; }
+.btn-unread { font-size:11px; padding:4px 8px; border:1px solid var(--line); border-radius:4px; color:var(--muted); margin-left:8px; }
+.btn-unread:hover { color:var(--text); border-color:var(--acc); }
+.btn-pos-feedback { font-size:13px; padding:2px 6px; border:none; background:none; cursor:pointer; opacity:0.6; transition:0.2s; margin-left:4px; }
+.btn-pos-feedback:hover { opacity:1; transform:scale(1.15); }
+.src-label { font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--dim); margin-bottom:10px; }
+.src-list { list-style:none; }
+.src-list li { padding:10px 0; border-top:1px solid var(--line); }
+.src-list a { display:flex; justify-content:space-between; gap:10px; font-size:12px; }
+.src-list a:hover { color:var(--acc); }
+.src-list a span:last-child { color:var(--dim); }
+.src-meta { display:block; font-family:var(--mono); font-size:10px; color:var(--dim); margin-top:4px; }
+.fb { float:right; margin-top:-14px; font-size:14px; opacity:0.5; }
+.fb:hover { opacity:1; }
+.summary { font-size:13px; line-height:1.7; margin-bottom:16px; color:var(--text); }
+.summary em { color:var(--muted); }
 
-            var key = gid + ':' + cnt;
-            var groups = getReadGroups();
-            groups[key] = { groupId: gid, count: cnt, timestamp: Date.now() };
-            saveReadGroups(groups);
+.empty { text-align:center; padding:60px 20px; color:var(--dim); }
+.empty__icon { font-size:40px; margin-bottom:12px; }
+.empty h2 { font-size:18px; color:var(--text); margin-bottom:6px; }
+.empty p { font-size:13px; }
+.empty-cat { padding:20px 0; color:var(--dim); font-size:12px; }
+.notice-banner { background:#1c2129; border:1px solid #30363d; border-radius:8px; padding:12px; margin-bottom:20px; font-size:12px; color:var(--muted); }
 
-            card.classList.add('topic-read');
-            // Show "mark unread" button
-            var unreadBtn = card.querySelector('.mark-unread-btn');
-            if (unreadBtn) unreadBtn.style.display = 'inline-flex';
-        }
+.sentinel { height:1px; width:100%; grid-column:1/-1; }
+#loading { position:fixed; bottom:20px; right:20px; background:var(--acc); color:#000; padding:8px 16px; border-radius:8px; font-size:12px; font-weight:600; opacity:0; transition:opacity 0.2s; pointer-events:none; z-index:100; }
+.htmx-request #loading { opacity:1; }
 
-        function markUnread(card) {
-            var gid = card.dataset.groupId;
-            var cnt = card.dataset.groupCount;
-            if (!gid) return;
+.toast-container { position:fixed; top:20px; right:20px; z-index:200; display:flex; flex-direction:column; gap:8px; }
+.toast { background:var(--card-open); border:1px solid var(--line); border-radius:8px; padding:12px 16px; font-size:12px; transform:translateX(100%); transition:transform 0.3s; max-width:300px; }
+.toast--show { transform:translateX(0); }
+.toast--error { border-color:var(--bad); color:var(--bad); }
+.toast--info { border-color:var(--acc); color:var(--acc); }
 
-            var key = gid + ':' + cnt;
-            var groups = getReadGroups();
-            delete groups[key];
-            saveReadGroups(groups);
+@keyframes spin { to { transform:rotate(360deg); } }
 
-            card.classList.remove('topic-read');
-            // Hide "mark unread" button
-            var unreadBtn = card.querySelector('.mark-unread-btn');
-            if (unreadBtn) unreadBtn.style.display = 'none';
-        }
-
-        function restoreReadState() {
-            var groups = getReadGroups();
-            document.querySelectorAll('.topic-card[data-group-id]').forEach(function(card) {
-                var gid = card.dataset.groupId;
-                var cnt = card.dataset.groupCount;
-                var key = gid + ':' + cnt;
-                if (groups[key]) {
-                    card.classList.add('topic-read');
-                    var unreadBtn = card.querySelector('.mark-unread-btn');
-                    if (unreadBtn) unreadBtn.style.display = 'inline-flex';
-                }
-            });
-        }
-
-        // Clean up old entries (older than 24 hours) to avoid localStorage bloat
-        function cleanupReadState() {
-            var groups = getReadGroups();
-            var cutoff = Date.now() - (24 * 60 * 60 * 1000);
-            var changed = false;
-            for (var key in groups) {
-                if (groups[key].timestamp && groups[key].timestamp < cutoff) {
-                    delete groups[key];
-                    changed = true;
-                }
-            }
-            if (changed) saveReadGroups(groups);
-        }
-        cleanupReadState();
-
-        // Sidebar toggle (mobile)
-        function toggleSidebar() {
-            var sb = document.getElementById('sidebar');
-            var ov = document.getElementById('sidebar-overlay');
-            sb.classList.toggle('open');
-            if (sb.classList.contains('open')) {
-                ov.classList.add('visible');
-                ov.style.display = 'block';
-            } else {
-                ov.classList.remove('visible');
-                setTimeout(function() { ov.style.display = 'none'; }, 350);
-            }
-        }
-
-        // Theme toggle with localStorage persistence
-        function toggleTheme() {
-            var html = document.documentElement;
-            var next = html.dataset.theme === 'light' ? 'dark' : 'light';
-            html.dataset.theme = next;
-            localStorage.setItem('theme', next);
-            var btn = document.getElementById('theme-btn-text');
-            if (btn) btn.textContent = next === 'light' ? 'Dark mode' : 'Light mode';
-            var icon = document.getElementById('theme-btn-icon');
-            if (icon) icon.textContent = next === 'light' ? '☀️' : '🌙';
-        }
-
-        // Restore saved theme
-        (function() {
-            var saved = localStorage.getItem('theme');
-            if (saved) {
-                document.documentElement.dataset.theme = saved;
-            }
-        })();
-
-        // Category section collapse/expand
-        function toggleCategory(el) {
-            var section = el.closest('.category-section');
-            if (section) section.classList.toggle('collapsed');
-        }
-
-        // Filter active state
-        document.addEventListener('htmx:afterSwap', function(e) {
-            if (e.detail.target && e.detail.target.id === 'articles') {
-                // Highlight active nav item
-                var trigger = e.detail.requestConfig && e.detail.requestConfig.elt;
-                if (trigger && trigger.classList && trigger.classList.contains('nav-item')) {
-                    document.querySelectorAll('.nav-item').forEach(function(n) { n.classList.remove('active'); });
-                    trigger.classList.add('active');
-                }
-                // Re-assign stagger indices for newly loaded cards
-                assignCardIndices();
-                // Restore read state for newly loaded cards
-                restoreReadState();
-            }
-        });
-
-        // Assign stagger animation indices to cards
-        function assignCardIndices() {
-            document.querySelectorAll('.topic-grid').forEach(function(grid) {
-                grid.querySelectorAll('.topic-card').forEach(function(card, i) {
-                    card.style.setProperty('--card-index', i);
-                });
-            });
-        }
-
-        // Smooth scroll to expanded card + mark-as-read on summary arrival
-        document.addEventListener('htmx:load', function(e) {
-            var card = e.detail.elt;
-            if (card && card.classList && card.classList.contains('topic-card') && card.classList.contains('expanded')) {
-                if (card.dataset.summarized === 'true') {
-                    markAsRead(card);
-                    setTimeout(function() {
-                        card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-                    }, 100);
-                }
-            }
-        });
-
-        // ── Global Error Handling ──
-        document.addEventListener('htmx:responseError', function(e) {
-            showToast('Something went wrong. Please try again.', 'error');
-        });
-        document.addEventListener('htmx:sendError', function(e) {
-            showToast('Network error. Please check your connection.', 'error');
-        });
-        document.addEventListener('htmx:timeout', function(e) {
-            showToast('The request took too long. Please try again.', 'error');
-        });
-
-        function showToast(message, type) {
-            var container = document.getElementById('toast-container');
-            if (!container) return;
-            var toast = document.createElement('div');
-            toast.className = 'toast toast-' + (type || 'info');
-            toast.innerHTML = '<span>' + (type === 'error' ? '❌' : 'ℹ️') + '</span> ' + message;
-            container.appendChild(toast);
-            
-            // Trigger animation
-            setTimeout(function() { toast.classList.add('show'); }, 10);
-            
-            // Remove after 3.5s
-            setTimeout(function() {
-                toast.classList.remove('show');
-                setTimeout(function() { toast.remove(); }, 300);
-            }, 3500);
-        }
-    </script>
-    <link rel="stylesheet" href="/static/style.css">
+@media(max-width:900px) {
+  .layout { grid-template-columns:1fr; }
+  .panel { position:fixed; left:-280px; width:260px; z-index:50; transition:left 0.25s; box-shadow:20px 0 60px rgba(0,0,0,0.5); }
+  .panel--open { left:0; }
+  .menu-btn { display:block; }
+  .main { padding:0 16px 30px; }
+  .header h1 { font-size:24px; }
+  .meta { display:none; }
+  .cards { grid-template-columns:1fr; }
+  .card--open { grid-column:auto; }
+}
+</style>
 </head>
-<body hx-headers='{"HX-Request": "true"}'>
-    <!-- Toast Notifications Container -->
-    <div id="toast-container" class="toast-container"></div>
-
-    <div class="app-layout">
-        <div class="bg-mesh-glow"></div>
-
-        <!-- Sidebar Overlay (mobile) -->
-        <div id="sidebar-overlay" class="sidebar-overlay" onclick="toggleSidebar()"></div>
-
-        <!-- Sidebar -->
-        <aside id="sidebar" class="sidebar">
-            <div class="sidebar-header">
-                <div class="sidebar-brand">
-                    <span class="sidebar-logo">🤖</span>
-                    <span class="sidebar-title">Miniflux AI</span>
-                </div>
-                <div class="sidebar-subtitle">AI-grouped news · {{.Total}} articles</div>
-            </div>
-
-            <nav class="sidebar-nav">
-                <div class="sidebar-nav-label">Categories</div>
-                <ul class="nav-list">
-                    <li>
-                        <button class="nav-item active"
-                                hx-get="/filter?cat=all"
-                                hx-target="#articles"
-                                hx-push-url="true"
-                                hx-indicator="#loading"
-                                onclick="if(window.innerWidth<=768)toggleSidebar()">
-                            <span class="nav-icon">📋</span>
-                            <span class="nav-label">All Articles</span>
-                            <span class="nav-count">{{.Total}}</span>
-                        </button>
-                    </li>
-                    {{range .Categories}}
-                    <li>
-                        <button class="nav-item"
-                                hx-get="/filter?cat={{.Category | urlquery}}"
-                                hx-target="#articles"
-                                hx-push-url="true"
-                                hx-indicator="#loading"
-                                onclick="if(window.innerWidth<=768)toggleSidebar()">
-                            <span class="nav-icon">{{catIcon .Category}}</span>
-                            <span class="nav-label">{{.Category}}</span>
-                            <span class="nav-count">{{.Count}}</span>
-                        </button>
-                    </li>
-                    {{end}}
-                </ul>
-                
-                {{if .TopTags}}
-                <div class="sidebar-nav-label" style="margin-top: 16px;">Hashtags</div>
-                <ul class="nav-list">
-                    {{range .TopTags}}
-                    <li>
-                        <button class="nav-item"
-                                hx-get="/search?q=%23{{.Tag | urlquery}}"
-                                hx-target="#articles"
-                                hx-push-url="false"
-                                hx-indicator="#loading"
-                                onclick="if(window.innerWidth<=768)toggleSidebar(); document.querySelector('.search-input').value = '#{{.Tag}}';">
-                            <span class="nav-icon">#</span>
-                            <span class="nav-label">{{.Tag}}</span>
-                            <span class="nav-count">{{.Count}}</span>
-                        </button>
-                    </li>
-                    {{end}}
-                </ul>
-                {{end}}
-            </nav>
-
-            <div class="sidebar-footer">
-                <button class="theme-toggle-btn" onclick="toggleTheme()">
-                    <span id="theme-btn-icon">🌙</span>
-                    <span id="theme-btn-text">Light mode</span>
-                </button>
-                <div class="sidebar-shortcuts">
-                    <span class="kbd-hint"><kbd>/</kbd> Search</span>
-                    <span class="kbd-hint"><kbd>Esc</kbd> Close</span>
-                </div>
-                <div class="sidebar-footer-links">
-                    <a href="https://miniflux.app" target="_blank" rel="noopener">Miniflux</a>
-                    <a href="https://gemini.google.com" target="_blank" rel="noopener">Gemini AI</a>
-                    <a href="https://htmx.org" target="_blank" rel="noopener">HTMX</a>
-                    <a href="https://go.dev" target="_blank" rel="noopener">Go</a>
-                </div>
-            </div>
-        </aside>
-
-        <!-- Content Area -->
-        <div class="content-area">
-            {{ block "page" . }}
-            <header class="content-header">
-                <div class="content-header-inner">
-                    <button class="hamburger-btn" onclick="toggleSidebar()" aria-label="Toggle sidebar">☰</button>
-                    <div class="search-wrapper">
-                        <span class="search-icon">🔍</span>
-                        <input type="search" name="q" class="search-input"
-                               placeholder="Search articles..."
-                               autocomplete="off"
-                               hx-get="/search"
-                               hx-trigger="input changed delay:300ms, search"
-                               hx-target="#articles"
-                               hx-push-url="false">
-                    </div>
-                    <div class="header-stats" id="stats-tab">
-                        <span class="stat-chip">
-                            <span class="stat-chip-icon">🤖</span>
-                            {{.Total}} articles
-                        </span>
-                        <span class="stat-chip">
-                            <span class="stat-chip-icon">🕐</span>
-                            {{.Generated}}
-                        </span>
-                    </div>
-                    <a href="/" class="refresh-btn" title="Homepage" style="text-decoration: none;">🏠</a>
-                </div>
-            </header>
-
-            <div id="loading" class="htmx-indicator loading-bar">
-                <div class="loading-bar-inner"></div>
-            </div>
-
-            <main class="main-content">
-                {{ template "articles" . }}
-            </main>
-
-            <footer class="content-footer">
-                <p>Powered by Miniflux · Gemini AI · HTMX · Go</p>
-            </footer>
-            {{ end }}
-        </div>
-
+<body>
+<div id="toast-container" class="toast-container"></div>
+<div id="loading">Loading…</div>
+<div class="layout">
+  <aside id="panel" class="panel">
+    <div class="panel__brand">news flow</div>
+    <div class="panel__section">
+      <div class="panel__label">Topics</div>
+      <ul class="nav">
+        <li><a class="nav__item nav__item--active" href="/" hx-get="/filter?cat=all" hx-target="#stream"><span class="nav__icon">◈</span>All<span class="nav__count">{{.Total}}</span></a></li>
+        {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-push-url="true" onclick="document.getElementById('panel').classList.remove('panel--open')"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+      </ul>
     </div>
+    {{if .TopTags}}
+    <div class="panel__section">
+      <div class="panel__label">Tags</div>
+      <ul class="nav">
+        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" onclick="document.getElementById('panel').classList.remove('panel--open')"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+      </ul>
+    </div>
+    {{end}}
+    <div class="panel__footer">
+      <div class="theme-row"><button class="theme-btn" onclick="setTheme('dark')">Dark</button><button class="theme-btn" onclick="setTheme('light')">Light</button></div>
+      <span>/ search · esc close</span>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="topbar">
+      <button class="menu-btn" onclick="toggleMenu()">☰</button>
+      <div class="search"><input type="search" name="q" placeholder="Search stories, feeds, tags" hx-get="/search" hx-trigger="input changed delay:300ms, search" hx-target="#stream" autocomplete="off"></div>
+      <div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span></div>
+    </div>
+    <div class="header">
+      <div class="header__eyebrow">Daily Brief</div>
+      <h1>Stories worth your time</h1>
+      <p>AI-grouped clusters from your feeds. Click to expand, summarize, and explore sources.</p>
+    </div>
+    {{template "articles" .}}
+  </main>
+</div>
 </body>
 </html>
 {{end}}
+{{define "stats-old"}}<div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span></div>{{end}}

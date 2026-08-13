@@ -19,6 +19,8 @@ type TemplateSet struct {
 func LoadTemplates(embeddedFS fs.FS) (*TemplateSet, error) {
 	funcMap := template.FuncMap{
 		"upper": strings.ToUpper,
+		"add":   func(a, b int) int { return a + b },
+		"mul":   func(a, b int) int { return a * b },
 		"catIcon": func(cat string) string {
 			switch {
 			case strings.Contains(cat, "Μουσική"):

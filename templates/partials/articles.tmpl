@@ -1,201 +1,88 @@
 {{define "articles"}}
-<div id="articles" class="articles-container">
-    {{if .IsFallback}}
-    <div class="fallback-banner">
-        <span class="fallback-icon">⏳</span>
-        <div class="fallback-text">
-            <strong>Η ομαδοποίηση των άρθρων εκτελείται στο παρασκήνιο...</strong>
-            <p>Τα άρθρα εμφανίζονται προσωρινά χωρίς επεξεργασία AI. Κάντε μια <a href="/" hx-get="/" hx-target="body">ανανέωση</a> σε λίγο.</p>
-        </div>
-    </div>
+<div id="stream">
+{{if .IsFallback}}<div class="notice-banner">⏳ AI grouping is running in the background. Showing raw articles temporarily.</div>{{end}}
+{{range .Categories}}
+<section class="cat" id="cat-{{.Category}}">
+  <div class="cat__head" onclick="this.parentElement.classList.toggle('cat--closed')">
+    <span class="cat__icon">{{catIcon .Category}}</span>
+    <span class="cat__name">{{.Category}}</span>
+    <span class="cat__count">{{.Count}} {{if eq .Count 1}}story{{else}}stories{{end}}</span>
+    <span class="cat__arrow">▾</span>
+  </div>
+  {{if eq .Count 0}}<div class="empty-cat">No stories in this category.</div>{{else}}
+  <div class="cards" id="cards-{{.Category}}">
+    {{$cat := .Category}}
+    {{range $idx, $group := .Groups}}
+    {{if lt $idx 20}}
+    {{template "card" $group}}
     {{end}}
-    {{range .Categories}}
-    <section class="category-section" id="cat-{{.Category}}">
-        <div class="category-header" onclick="toggleCategory(this)">
-            <span class="category-toggle-icon">▾</span>
-            <h2 class="category-title">
-                <span class="cat-icon">{{catIcon .Category}}</span>
-                {{.Category}}
-            </h2>
-            <span class="category-count">{{.Count}} άρθρ{{if ne .Count 1}}α{{else}}ο{{end}}</span>
-        </div>
-
-        {{if eq .Count 0}}
-        <div class="empty-category">
-            <p>Δεν υπάρχουν άρθρα σε αυτήν την κατηγορία 🐻</p>
-        </div>
-        {{else}}
-        <div class="topic-grid">
-            {{$cat := .Category}}
-            {{range $idx, $group := .Groups}}
-            <div class="topic-card" id="topic-{{$group.GroupID}}" data-group-id="{{$group.GroupID}}" data-group-count="{{$group.Count}}">
-                <div class="topic-header" onclick="toggleExpand(this)">
-                    <div class="topic-title-row">
-                        <span class="topic-expand-icon">▼</span>
-                        <span class="topic-count-badge">{{$group.Count}}</span>
-                        <h3 class="topic-title">{{$group.Topic}}</h3>
-                        <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Mark unread">
-                            📬 Mark unread
-                        </button>
-                    </div>
-                    <div class="topic-preview">
-                        {{range $group.Tags}}
-                        <span class="topic-source-tag ai-tag">#{{.}}</span>
-                        {{end}}
-                        {{range uniqueFeeds $group.Articles}}
-                        <span class="topic-source-tag">{{.}}</span>
-                        {{end}}
-                    </div>
-                </div>
-                <div class="summary-body">
-                    <div style="margin-bottom: 20px;">
-                        <button class="summarize-action-btn"
-                             hx-post="/summarize"
-                             hx-vals='{"category": "{{$cat}}", "group_id": "{{$group.GroupID}}", "group": "{{$idx}}"}'
-                             hx-target="closest .topic-card"
-                             hx-swap="outerHTML"
-                             hx-request='{"timeout": 20000}'
-                             onclick="event.stopPropagation();">
-                             <span class="btn-text">✨ Summarize Topic</span>
-                             <span class="btn-spinner"></span>
-                        </button>
-                    </div>
-                    <div class="summary-sources">
-                        <h4 class="sources-title">📰 Sources</h4>
-                        <ul class="sources-list">
-                            {{range $group.Articles}}
-                            <li class="source-item">
-                                <a href="{{.URL}}" target="_blank" rel="noopener" class="source-link">
-                                    <span class="source-name">{{.Title}}</span>
-                                    <span class="source-arrow">→</span>
-                                </a>
-                                <div class="source-meta-row">
-                                    <span class="source-meta">{{.Feed}} · {{.TimeAgo}}</span>
-                                </div>
-                            </li>
-                            {{end}}
-                        </ul>
-                    </div>
-                </div>
-            </div>
-            {{end}}
-        </div>
-        {{end}}
-    </section>
     {{end}}
-
-    {{if eq (len .Categories) 0}}
-    <div class="empty-state">
-        <div class="empty-icon">📭</div>
-        <h2>Δεν βρέθηκαν άρθρα</h2>
-        <p>Δοκιμάστε να αλλάξετε το φίλτρο ή την αναζήτηση</p>
-    </div>
-    {{end}}
+  </div>
+  {{if gt .Count 20}}
+  <div class="sentinel" hx-get="/cards?cat={{.Category}}&offset=20" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="#loading"></div>
+  {{end}}
+  {{end}}
+</section>
+{{end}}
+{{if eq (len .Categories) 0}}<div class="empty"><div class="empty__icon">◎</div><h2>No matching stories</h2><p>Try a different search or tag.</p></div>{{end}}
 </div>
 {{end}}
 
+{{define "card"}}
+<div class="card" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{.Count}}">
+  <div class="card__head" onclick="toggleCard(this)">
+    <span class="card__num">◈</span>
+    <span class="card__title">{{.Topic}}</span>
+    <span class="card__cnt">{{.Count}}</span>
+  </div>
+  <div class="card__body">
+    <div class="card__tags">{{range .Tags}}<span class="tag">#{{.}}</span>{{end}}{{range uniqueFeeds .Articles}}<span class="tag tag--src">{{.}}</span>{{end}}</div>
+    <button class="btn-sum" hx-post="/summarize" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="closest .card" hx-swap="outerHTML" onclick="event.stopPropagation()"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
+    <div class="src-label">Sources</div>
+    <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span></li>{{end}}</ul>
+  </div>
+</div>
+{{end}}
+
+{{define "cards-sentinel"}}
+<div class="sentinel" hx-get="/cards?cat={{.cat}}&offset={{.offset}}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="#loading"></div>
+{{end}}
+
+{{define "cards-empty"}}
+<div class="empty"><div class="empty__icon">◎</div><h2>No more stories</h2><p>You've reached the end.</p></div>
+{{end}}
+
 {{define "summary"}}
-<div class="topic-card expanded" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
-    <div class="topic-header" onclick="toggleExpand(this)">
-        <div class="topic-title-row">
-            <span class="topic-expand-icon">▼</span>
-            <h3 class="topic-title">{{.Topic}}</h3>
-            <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Mark unread">
-                📬 Mark unread
-            </button>
-            <button hx-post="/feedback/positive" 
-                    hx-vals='{"category": "{{.Category}}", "group_id": "{{.GroupID}}"}' 
-                    hx-swap="outerHTML" 
-                    class="positive-feedback-btn" 
-                    title="Mark group as positive"
-                    onclick="event.stopPropagation(); this.closest('.topic-card').querySelectorAll('.feedback-btn').forEach(b => b.style.display = 'none');"
-                    style="margin-left: 8px; font-size: 1.2rem; cursor: pointer; background: none; border: none; padding: 0.2rem; transition: transform 0.2s;">👍</button>
-        </div>
-    </div>
-    <div class="summary-body">
-        <div class="topic-preview" style="margin-top: 0; margin-bottom: 16px; padding-left: 0;">
-            {{range .Tags}}
-            <span class="topic-source-tag ai-tag">#{{.}}</span>
-            {{end}}
-        </div>
-        <div class="summary-text">
-            {{.Summary}}
-        </div>
-        <div class="summary-sources">
-            <h4 class="sources-title">📰 Πηγές / Sources</h4>
-            <ul class="sources-list">
-                {{range .Articles}}
-                <li class="source-item">
-                    <a href="{{.URL}}" target="_blank" rel="noopener" class="source-link">
-                        <span class="source-name">{{.Title}}</span>
-                        <span class="source-arrow">→</span>
-                    </a>
-                    <div class="source-meta-row">
-                        <span class="source-meta">{{.Feed}}</span>
-                        <button hx-post="/feedback" 
-                                hx-vals='{"category": "{{$.Category}}", "group_id": "{{$.GroupID}}", "irrelevant_url": "{{.URL}}"}' 
-                                hx-swap="outerHTML" 
-                                class="feedback-btn" 
-                                title="Mark as irrelevant"
-                                onclick="let pBtn = this.closest('.topic-card').querySelector('.positive-feedback-btn'); if(pBtn) pBtn.style.display='none';">👎</button>
-                    </div>
-                </li>
-                {{end}}
-            </ul>
-        </div>
-    </div>
+<div class="card card--open" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
+  <div class="card__head" onclick="toggleCard(this)">
+    <span class="card__num">AI</span>
+    <span class="card__title">{{.Topic}}</span>
+    <span class="card__cnt">{{len .Articles}}</span>
+    <button class="btn-unread" style="display:none" onclick="event.stopPropagation(); markUnread(this.closest('.card'))" title="Mark unread">📬 Unread</button>
+    <button hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-swap="outerHTML" class="btn-pos-feedback" title="Good summary" onclick="event.stopPropagation(); this.closest('.card').querySelectorAll('.fb').forEach(b => b.style.display='none');">👍</button>
+  </div>
+  <div class="card__body">
+    <div class="card__tags">{{range .Tags}}<span class="tag">#{{.}}</span>{{end}}</div>
+    <div class="summary">{{.Summary}}</div>
+    <div class="src-label">Sources</div>
+    <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span><button class="fb" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-swap="outerHTML" onclick="event.stopPropagation(); let p = this.closest('.card').querySelector('.btn-pos-feedback'); if(p) p.style.display='none';" title="Not relevant">✕</button></li>{{end}}</ul>
+  </div>
 </div>
 {{end}}
 
 {{define "summary-fallback"}}
-<div class="topic-card expanded" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
-    <div class="topic-header" onclick="toggleExpand(this)">
-        <div class="topic-title-row">
-            <span class="topic-expand-icon">▼</span>
-            <h3 class="topic-title">{{.Topic}}</h3>
-            <button class="mark-unread-btn" style="display:none;" onclick="event.stopPropagation(); markUnread(this.closest('.topic-card'));" title="Mark unread">
-                📬 Mark unread
-            </button>
-            <button hx-post="/feedback/positive" 
-                    hx-vals='{"category": "{{.Category}}", "group_id": "{{.GroupID}}"}' 
-                    hx-swap="outerHTML" 
-                    class="positive-feedback-btn" 
-                    title="Mark group as positive"
-                    onclick="event.stopPropagation(); this.closest('.topic-card').querySelectorAll('.feedback-btn').forEach(b => b.style.display = 'none');"
-                    style="margin-left: 8px; font-size: 1.2rem; cursor: pointer; background: none; border: none; padding: 0.2rem; transition: transform 0.2s;">👍</button>
-        </div>
-    </div>
-    <div class="summary-body">
-        <div class="topic-preview" style="margin-top: 0; margin-bottom: 16px; padding-left: 0;">
-            {{range .Tags}}
-            <span class="topic-source-tag ai-tag">#{{.}}</span>
-            {{end}}
-        </div>
-        <div class="summary-text">
-            <em>⚠️ Η περίληψη δεν ήταν διαθέσιμη. Δείτε τις πηγές παρακάτω:</em>
-        </div>
-        <div class="summary-sources">
-            <h4 class="sources-title">📰 Sources</h4>
-            <ul class="sources-list">
-                {{range .Articles}}
-                <li class="source-item">
-                    <a href="{{.URL}}" target="_blank" rel="noopener" class="source-link">
-                        <span class="source-name">{{.Title}}</span>
-                        <span class="source-arrow">→</span>
-                    </a>
-                    <div class="source-meta-row">
-                        <span class="source-meta">{{.Feed}} · {{.TimeAgo}}</span>
-                        <button hx-post="/feedback" 
-                                hx-vals='{"category": "{{$.Category}}", "group_id": "{{$.GroupID}}", "irrelevant_url": "{{.URL}}"}' 
-                                hx-swap="outerHTML" 
-                                class="feedback-btn" 
-                                title="Mark as irrelevant"
-                                onclick="let pBtn = this.closest('.topic-card').querySelector('.positive-feedback-btn'); if(pBtn) pBtn.style.display='none';">👎</button>
-                    </div>
-                </li>
-                {{end}}
-            </ul>
-        </div>
-    </div>
+<div class="card card--open" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
+  <div class="card__head" onclick="toggleCard(this)">
+    <span class="card__num">AI</span>
+    <span class="card__title">{{.Topic}}</span>
+    <span class="card__cnt">{{len .Articles}}</span>
+    <button class="btn-unread" style="display:none" onclick="event.stopPropagation(); markUnread(this.closest('.card'))" title="Mark unread">📬 Unread</button>
+    <button hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-swap="outerHTML" class="btn-pos-feedback" title="Good summary" onclick="event.stopPropagation(); this.closest('.card').querySelectorAll('.fb').forEach(b => b.style.display='none');">👍</button>
+  </div>
+  <div class="card__body">
+    <div class="summary"><em>Summary unavailable. Sources below.</em></div>
+    <div class="src-label">Sources</div>
+    <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span><button class="fb" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-swap="outerHTML" onclick="event.stopPropagation(); let p = this.closest('.card').querySelector('.btn-pos-feedback'); if(p) p.style.display='none';" title="Not relevant">✕</button></li>{{end}}</ul>
+  </div>
 </div>
 {{end}}

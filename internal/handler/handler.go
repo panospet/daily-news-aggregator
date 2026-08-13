@@ -18,8 +18,8 @@ import (
 
 // Server holds all dependencies for HTTP handlers.
 type Server struct {
-	Cfg         config.Config
-	DB          *sql.DB
+	Cfg        config.Config
+	DB         *sql.DB
 	Tpl        *TemplateSet
 	Cache      *cache.ArticleCache
 	AICache    *cache.AICache
@@ -48,9 +48,52 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /filter", s.CategoryFilter)
 	mux.HandleFunc("GET /search", s.Search)
 	mux.HandleFunc("GET /stats", s.Stats)
+	mux.HandleFunc("GET /cards", s.Cards)
 	mux.HandleFunc("POST /summarize", s.HandleSummarize)
 	mux.HandleFunc("POST /feedback", s.HandleFeedback)
 	mux.HandleFunc("POST /feedback/positive", s.HandlePositiveFeedback)
+}
+
+// Cards serves paginated cards for infinite scroll.
+func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
+	cat := r.URL.Query().Get("cat")
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+	const limit = 20
+
+	data, err := s.GetDataWithFallback()
+	if err != nil {
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+
+	var catGroups []models.AIGroup
+	for _, cg := range data.Categories {
+		if cat == "" || cat == "all" || strings.EqualFold(cg.Category, cat) {
+			catGroups = append(catGroups, cg.Groups...)
+		}
+	}
+
+	end := offset + limit
+	if end > len(catGroups) {
+		end = len(catGroups)
+	}
+	batch := catGroups[offset:end]
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	for _, g := range batch {
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "card", g)
+	}
+	if end < len(catGroups) {
+		next := strconv.Itoa(end)
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "cards-sentinel", map[string]interface{}{"cat": cat, "offset": next})
+	}
+	if offset == 0 && len(catGroups) == 0 {
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "cards-empty", nil)
+	}
 }
 
 // Home serves the main dashboard page.
