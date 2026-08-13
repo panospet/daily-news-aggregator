@@ -70,10 +70,18 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-cache")
 
-	var catGroups []models.AIGroup
+	var catGroups []struct {
+		Category string
+		Group    models.AIGroup
+	}
 	for _, cg := range data.Categories {
 		if cat == "" || cat == "all" || strings.EqualFold(cg.Category, cat) {
-			catGroups = append(catGroups, cg.Groups...)
+			for _, g := range cg.Groups {
+				catGroups = append(catGroups, struct {
+					Category string
+					Group    models.AIGroup
+				}{Category: cg.Category, Group: g})
+			}
 		}
 	}
 
@@ -84,8 +92,8 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	batch := catGroups[offset:end]
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	for _, g := range batch {
-		_ = s.Tpl.Partial.ExecuteTemplate(w, "card", g)
+	for _, item := range batch {
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "card", item)
 	}
 	if end < len(catGroups) {
 		next := strconv.Itoa(end)

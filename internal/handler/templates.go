@@ -21,6 +21,16 @@ func LoadTemplates(embeddedFS fs.FS) (*TemplateSet, error) {
 		"upper": strings.ToUpper,
 		"add":   func(a, b int) int { return a + b },
 		"mul":   func(a, b int) int { return a * b },
+		"dict": func(values ...interface{}) map[string]interface{} {
+			m := make(map[string]interface{}, len(values)/2)
+			for i := 0; i+1 < len(values); i += 2 {
+				key, ok := values[i].(string)
+				if ok {
+					m[key] = values[i+1]
+				}
+			}
+			return m
+		},
 		"catIcon": func(cat string) string {
 			switch {
 			case strings.Contains(cat, "Μουσική"):

@@ -14,7 +14,7 @@
     {{$cat := .Category}}
     {{range $idx, $group := .Groups}}
     {{if lt $idx 20}}
-    {{template "card" $group}}
+    {{template "card" (dict "Category" $cat "Group" $group)}}
     {{end}}
     {{end}}
   </div>
@@ -29,17 +29,17 @@
 {{end}}
 
 {{define "card"}}
-<div class="card" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{.Count}}">
+<div class="card" id="topic-{{.Group.GroupID}}" data-group-id="{{.Group.GroupID}}" data-group-count="{{.Group.Count}}">
   <div class="card__head" onclick="toggleCard(this)">
     <span class="card__num">◈</span>
-    <span class="card__title">{{.Topic}}</span>
-    <span class="card__cnt">{{.Count}}</span>
+    <span class="card__title">{{.Group.Topic}}</span>
+    <span class="card__cnt">{{.Group.Count}}</span>
   </div>
   <div class="card__body">
-    <div class="card__tags">{{range .Tags}}<span class="tag">#{{.}}</span>{{end}}{{range uniqueFeeds .Articles}}<span class="tag tag--src">{{.}}</span>{{end}}</div>
-    <button class="btn-sum" hx-post="/summarize" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="closest .card" hx-swap="outerHTML" onclick="event.stopPropagation()"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
+    <div class="card__tags">{{range .Group.Tags}}<span class="tag">#{{.}}</span>{{end}}{{range uniqueFeeds .Group.Articles}}<span class="tag tag--src">{{.}}</span>{{end}}</div>
+    <button class="btn-sum" hx-post="/summarize" hx-vals='{"category":"{{.Category}}","group_id":"{{.Group.GroupID}}"}' hx-target="closest .card" hx-swap="outerHTML" onclick="event.stopPropagation()"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
     <div class="src-label">Sources</div>
-    <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span></li>{{end}}</ul>
+    <ul class="src-list">{{range .Group.Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span></li>{{end}}</ul>
   </div>
 </div>
 {{end}}
