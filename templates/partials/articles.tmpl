@@ -28,7 +28,7 @@
         <div class="topic-grid">
             {{$cat := .Category}}
             {{range $idx, $group := .Groups}}
-            <div class="topic-card" id="topic-{{$cat}}-{{$idx}}" data-group-id="{{$group.GroupID}}" data-group-count="{{$group.Count}}">
+            <div class="topic-card" id="topic-{{$group.GroupID}}" data-group-id="{{$group.GroupID}}" data-group-count="{{$group.Count}}">
                 <div class="topic-header" onclick="toggleExpand(this)">
                     <div class="topic-title-row">
                         <span class="topic-expand-icon">▼</span>
@@ -95,7 +95,7 @@
 {{end}}
 
 {{define "summary"}}
-<div class="topic-card expanded" id="summary-card" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
+<div class="topic-card expanded" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
     <div class="topic-header" onclick="toggleExpand(this)">
         <div class="topic-title-row">
             <span class="topic-expand-icon">▼</span>
@@ -148,7 +148,7 @@
 {{end}}
 
 {{define "summary-fallback"}}
-<div class="topic-card expanded" id="summary-fallback-card" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
+<div class="topic-card expanded" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-summarized="true">
     <div class="topic-header" onclick="toggleExpand(this)">
         <div class="topic-title-row">
             <span class="topic-expand-icon">▼</span>
