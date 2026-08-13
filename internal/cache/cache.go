@@ -165,7 +165,7 @@ func (c *AICache) Invalidate() {
 	c.client.Del(context.Background(), "ai_cache")
 }
 
-func (c *AICache) UpdateTopic(category string, groupIdx int, newTopic string) {
+func (c *AICache) UpdateTopic(category string, groupID string, newTopic string) {
 	ctx := context.Background()
 	c.refreshMutex.Lock()
 	defer c.refreshMutex.Unlock()
@@ -182,10 +182,13 @@ func (c *AICache) UpdateTopic(category string, groupIdx int, newTopic string) {
 
 	for catIdx, cg := range wrapper.Data.Categories {
 		if strings.EqualFold(cg.Category, category) {
-			if groupIdx >= 0 && groupIdx < len(cg.Groups) {
-				wrapper.Data.Categories[catIdx].Groups[groupIdx].Topic = newTopic
-				break
+			for gi, g := range cg.Groups {
+				if g.GroupID == groupID {
+					wrapper.Data.Categories[catIdx].Groups[gi].Topic = newTopic
+					break
+				}
 			}
+			break
 		}
 	}
 

@@ -259,7 +259,7 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		targetTopic = fancyTopic
 
 		// Write-update the cached topic name in Redis
-		s.AICache.UpdateTopic(cat, groupIdx, fancyTopic)
+		s.AICache.UpdateTopic(cat, targetGroup.GroupID, fancyTopic)
 	}
 
 	formattedSummary := strings.ReplaceAll(summary.Summary, "\n", "<br>")
