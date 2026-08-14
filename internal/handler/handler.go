@@ -61,7 +61,7 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	const limit = 20
+	const limit = 50
 
 	data, err := s.GetDataWithFallback()
 	if err != nil {

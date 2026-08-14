@@ -13,13 +13,13 @@
   <div class="cards" id="cards-{{.Category}}">
     {{$cat := .Category}}
     {{range $idx, $group := .Groups}}
-    {{if lt $idx 20}}
+    {{if lt $idx 50}}
     {{template "card" (dict "Category" $cat "Group" $group)}}
     {{end}}
     {{end}}
   </div>
-  {{if gt .Count 20}}
-  <div class="sentinel" hx-get="/cards?cat={{.Category}}&offset=20" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="#loading"></div>
+  {{if gt .Count 50}}
+  <div class="sentinel" hx-get="/cards?cat={{.Category}}&offset=50" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="#loading"></div>
   {{end}}
   {{end}}
 </section>
