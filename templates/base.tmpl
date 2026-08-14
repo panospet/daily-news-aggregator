@@ -8,7 +8,7 @@
 <meta name="description" content="AI-powered news flow dashboard">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Noto+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="/static/htmx.min.js" defer></script>
 <script>
 (function() {
@@ -74,6 +74,11 @@ function restoreReadState() {
 
 function toggleMenu() {
   document.getElementById('panel').classList.toggle('panel--open');
+  document.getElementById('backdrop')?.classList.toggle('backdrop--open');
+}
+function closeMenu() {
+  document.getElementById('panel').classList.remove('panel--open');
+  document.getElementById('backdrop')?.classList.remove('backdrop--open');
 }
 function setTheme(mode) {
   document.documentElement.dataset.theme = mode;
@@ -96,7 +101,7 @@ document.addEventListener('keydown', function(e) {
   }
   if (e.key === 'Escape') {
     document.querySelectorAll('.card--open').forEach(function(x) { x.classList.remove('card--open'); });
-    document.getElementById('panel')?.classList.remove('panel--open');
+    closeMenu();
   }
 });
 
@@ -115,7 +120,7 @@ document.addEventListener('htmx:sendError', function() { showToast('Network erro
 document.addEventListener('htmx:timeout', function() { showToast('Request timed out. Please try again.', 'error'); });
 </script>
 <style>
-:root { color-scheme: dark; --bg:#07090d; --panel:#0d1117; --card:#10151d; --card-open:#151b25; --line:#1f2733; --text:#e6edf3; --muted:#8b949e; --dim:#6e7681; --acc:#58a6ff; --acc2:#bc8cff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --mono:'IBM Plex Mono',monospace; --sans:'Space Grotesk',system-ui,sans-serif; }
+:root { color-scheme: dark; --bg:#07090d; --panel:#0d1117; --card:#10151d; --card-open:#151b25; --line:#1f2733; --text:#e6edf3; --muted:#8b949e; --dim:#6e7681; --acc:#58a6ff; --acc2:#bc8cff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --mono:'IBM Plex Mono',monospace; --sans:'Roboto', 'Noto Sans', system-ui, sans-serif; }
 html[data-theme="light"] { color-scheme: light; --bg:#f6f8fa; --panel:#ffffff; --card:#ffffff; --card-open:#eaeef2; --line:#d0d7de; --text:#1f2328; --muted:#57606a; --dim:#6e7781; }
 * { box-sizing:border-box; margin:0; padding:0; }
 body { font-family:var(--sans); background:var(--bg); color:var(--text); line-height:1.6; }
@@ -176,8 +181,9 @@ button { font:inherit; color:inherit; background:none; border:none; cursor:point
 .card__body { display:none; padding:0 16px 16px; border-top:1px solid var(--line); }
 .card--open .card__body { display:block; padding-top:14px; }
 .card__tags { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
-.tag { font-family:var(--mono); font-size:10px; padding:3px 6px; border-radius:4px; background:var(--card-open); color:var(--acc2); border:1px solid var(--line); }
-.tag--src { color:var(--muted); }
+.tag { font-family:var(--sans); font-weight:600; font-size:11px; padding:3px 8px; border-radius:6px; background:var(--card-open); color:var(--acc2); border:1px solid var(--line); transition:0.2s; display:inline-block; }
+a.tag:hover { border-color:var(--acc2); color:#fff; }
+.tag--src { color:var(--muted); font-family:var(--mono); font-weight:400; font-size:10px; padding:3px 6px; border-radius:4px; }
 .btn-sum { display:inline-flex; align-items:center; gap:8px; padding:8px 12px; background:var(--acc); color:#000; font-size:12px; font-weight:600; border-radius:6px; margin-bottom:16px; position:relative; }
 .btn-sum:hover { filter:brightness(1.1); }
 .btn-sum__spinner { display:none; width:14px; height:14px; border:2px solid transparent; border-top-color:#000; border-radius:50%; animation:spin 0.8s linear infinite; }
@@ -218,7 +224,9 @@ button { font:inherit; color:inherit; background:none; border:none; cursor:point
 
 @keyframes spin { to { transform:rotate(360deg); } }
 
+.backdrop { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:40; }
 @media(max-width:900px) {
+  .backdrop--open { display:block; }
   .layout { grid-template-columns:1fr; }
   .panel { position:fixed; left:-280px; width:260px; z-index:50; transition:left 0.25s; box-shadow:20px 0 60px rgba(0,0,0,0.5); }
   .panel--open { left:0; }
@@ -234,6 +242,7 @@ button { font:inherit; color:inherit; background:none; border:none; cursor:point
 <body>
 <div id="toast-container" class="toast-container"></div>
 <div id="loading">Loading…</div>
+<div id="backdrop" class="backdrop" onclick="closeMenu()"></div>
 <div class="layout">
   <aside id="panel" class="panel">
     <div class="panel__brand">news flow</div>
@@ -241,14 +250,14 @@ button { font:inherit; color:inherit; background:none; border:none; cursor:point
       <div class="panel__label">Topics</div>
       <ul class="nav">
         <li><a class="nav__item nav__item--active" href="/" hx-get="/filter?cat=all" hx-target="#stream"><span class="nav__icon">◈</span>All<span class="nav__count">{{.Total}}</span></a></li>
-        {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-push-url="true" onclick="document.getElementById('panel').classList.remove('panel--open')"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+        {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-push-url="true" onclick="closeMenu()"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
     {{if .TopTags}}
     <div class="panel__section">
       <div class="panel__label">Tags</div>
       <ul class="nav">
-        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" onclick="document.getElementById('panel').classList.remove('panel--open')"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" onclick="closeMenu()"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
     {{end}}
