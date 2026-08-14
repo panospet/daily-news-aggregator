@@ -113,7 +113,7 @@ func main() {
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	log.Printf("🤖 Miniflux AI Dashboard starting on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, basicAuthMiddleware(cfg, mux)); err != nil {
+	if err := http.ListenAndServe(addr, basicAuthMiddleware(cfg, handler.GzipMiddleware(mux))); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

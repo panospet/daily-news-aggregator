@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"compress/gzip"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/panospet/daily-news-aggregator/internal/models"
@@ -69,5 +72,46 @@ func TestHome_Returns200(t *testing.T) {
 	}
 	if w.Code != 200 {
 		t.Errorf("expected default 200 from recorder, got %d", w.Code)
+	}
+}
+
+func TestGzipMiddleware(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<html>" + strings.Repeat("x", 2048) + "</html>"))
+	})
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	w := httptest.NewRecorder()
+	GzipMiddleware(handler).ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if got := w.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("expected Content-Encoding gzip, got %q", got)
+	}
+	zr, err := gzip.NewReader(w.Body)
+	if err != nil {
+		t.Fatalf("body is not valid gzip: %v", err)
+	}
+	body, err := io.ReadAll(zr)
+	if err != nil {
+		t.Fatalf("gzip read: %v", err)
+	}
+	if len(body) != len("<html>")+2048+len("</html>") {
+		t.Fatalf("expected %d decompressed bytes, got %d", 2048+13, len(body))
+	}
+
+	// Client without gzip support gets plain response.
+	req2 := httptest.NewRequest("GET", "/", nil)
+	w2 := httptest.NewRecorder()
+	GzipMiddleware(handler).ServeHTTP(w2, req2)
+	if got := w2.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("expected no Content-Encoding, got %q", got)
+	}
+	if strings.Contains(w2.Body.String(), "<html>") == false {
+		t.Fatal("expected plain body for non-gzip client")
 	}
 }

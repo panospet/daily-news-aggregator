@@ -49,6 +49,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /search", s.Search)
 	mux.HandleFunc("GET /stats", s.Stats)
 	mux.HandleFunc("GET /cards", s.Cards)
+	mux.HandleFunc("GET /card-body", s.CardBody)
 	mux.HandleFunc("POST /summarize", s.HandleSummarize)
 	mux.HandleFunc("POST /feedback", s.HandleFeedback)
 	mux.HandleFunc("POST /feedback/positive", s.HandlePositiveFeedback)
@@ -61,7 +62,7 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	if offset < 0 {
 		offset = 0
 	}
-	const limit = 50
+	const limit = 10
 
 	data, err := s.GetDataWithFallback()
 	if err != nil {
@@ -102,6 +103,41 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	if offset == 0 && len(catGroups) == 0 {
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "cards-empty", nil)
 	}
+}
+
+// CardBody serves the expandable body (tags, summarize button, sources)
+// for one group, fetched lazily when a card is first opened.
+func (s *Server) CardBody(w http.ResponseWriter, r *http.Request) {
+	groupID := r.URL.Query().Get("gid")
+	cat := r.URL.Query().Get("cat")
+	if groupID == "" {
+		http.Error(w, "Missing gid", http.StatusBadRequest)
+		return
+	}
+
+	data, err := s.GetDataWithFallback()
+	if err != nil {
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-cache")
+
+	for _, cg := range data.Categories {
+		if cat != "" && !strings.EqualFold(cg.Category, cat) {
+			continue
+		}
+		for _, g := range cg.Groups {
+			if g.GroupID == groupID {
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				_ = s.Tpl.Partial.ExecuteTemplate(w, "card-body", map[string]interface{}{
+					"Category": cg.Category,
+					"Group":    g,
+				})
+				return
+			}
+		}
+	}
+	http.Error(w, "Not found", http.StatusNotFound)
 }
 
 // Home serves the main dashboard page.

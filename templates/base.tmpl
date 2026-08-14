@@ -20,16 +20,30 @@ document.addEventListener('DOMContentLoaded', function() {
   restoreReadState();
   setInterval(function() {
     if (!document.querySelector('.card--open')) {
-      htmx.ajax('GET', '/', {target:'#stream', swap:'innerHTML'});
+      htmx.ajax('GET', '/', {target:'#stream', swap:'outerHTML'});
     }
   }, 600000);
 });
 
-function toggleCard(el) {
-  var card = el.closest('.card');
-  card.classList.toggle('card--open');
-  if (card.classList.contains('card--open') && card.dataset.summarized === 'true') {
-    markAsRead(card);
+function openCard(card) {
+  card.classList.add('card--open');
+  var body = card.querySelector('.card__body');
+  if (body && !body.dataset.loaded) {
+    body.classList.add('card__body--loading');
+    htmx.ajax('GET', '/card-body?gid=' + encodeURIComponent(card.dataset.groupId) + '&cat=' + card.dataset.cat,
+      {target: body, swap: 'innerHTML'}).then(function() {
+        body.dataset.loaded = '1';
+        body.classList.remove('card__body--loading');
+      });
+  }
+  if (card.dataset.summarized === 'true') markAsRead(card);
+}
+
+function toggleCard(card) {
+  if (card.classList.contains('card--open')) {
+    card.classList.remove('card--open');
+  } else {
+    openCard(card);
   }
 }
 
@@ -94,6 +108,28 @@ function showToast(msg, type) {
   setTimeout(function() { t.classList.add('toast--show'); }, 10);
   setTimeout(function() { t.classList.remove('toast--show'); setTimeout(function() { t.remove(); }, 300); }, 3500);
 }
+
+document.addEventListener('click', function(e) {
+  var t;
+  if ((t = e.target.closest('.btn-unread'))) { markUnread(t.closest('.card')); return; }
+  if ((t = e.target.closest('.theme-btn'))) { setTheme(t.dataset.setTheme); return; }
+  if (e.target.closest('#backdrop')) { closeMenu(); return; }
+  if (e.target.closest('.menu-btn')) { toggleMenu(); return; }
+  if (e.target.closest('.nav__item')) { closeMenu(); return; }
+  if ((t = e.target.closest('.btn-pos-feedback'))) {
+    var c = t.closest('.card');
+    if (c) c.querySelectorAll('.fb').forEach(function(b) { b.style.display = 'none'; });
+    return;
+  }
+  if ((t = e.target.closest('.fb'))) {
+    var c2 = t.closest('.card');
+    var p = c2 && c2.querySelector('.btn-pos-feedback');
+    if (p) p.style.display = 'none';
+    return;
+  }
+  if ((t = e.target.closest('.cat__head'))) { t.parentElement.classList.toggle('cat--closed'); return; }
+  if ((t = e.target.closest('.card__head'))) { toggleCard(t.closest('.card')); return; }
+});
 
 document.addEventListener('keydown', function(e) {
   if (e.key === '/' && !['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) {
@@ -180,6 +216,8 @@ button { font:inherit; color:inherit; background:none; border:none; cursor:point
 .card--open .card__cnt { background:var(--acc); color:#000; }
 .card__body { display:none; padding:0 16px 16px; border-top:1px solid var(--line); }
 .card--open .card__body { display:block; padding-top:14px; }
+.card--open .card__body--loading { min-height:64px; position:relative; }
+.card--open .card__body--loading::after { content:''; position:absolute; top:24px; left:50%; width:18px; height:18px; margin-left:-9px; border:2px solid var(--line); border-top-color:var(--acc); border-radius:50%; animation:spin 0.8s linear infinite; }
 .card__tags { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
 .tag { font-family:var(--sans); font-weight:600; font-size:11px; padding:3px 8px; border-radius:6px; background:var(--card-open); color:var(--acc2); border:1px solid var(--line); transition:0.2s; display:inline-block; }
 a.tag:hover { border-color:var(--acc2); color:#fff; }
@@ -242,34 +280,34 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
 <body>
 <div id="toast-container" class="toast-container"></div>
 <div id="loading">Loading…</div>
-<div id="backdrop" class="backdrop" onclick="closeMenu()"></div>
+<div id="backdrop" class="backdrop"></div>
 <div class="layout">
   <aside id="panel" class="panel">
     <div class="panel__brand">news flow</div>
     <div class="panel__section">
       <div class="panel__label">Topics</div>
       <ul class="nav">
-        <li><a class="nav__item nav__item--active" href="/" hx-get="/filter?cat=all" hx-target="#stream"><span class="nav__icon">◈</span>All<span class="nav__count">{{.Total}}</span></a></li>
-        {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-push-url="true" onclick="closeMenu()"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+        <li><a class="nav__item nav__item--active" href="/" hx-get="/filter?cat=all" hx-target="#stream" hx-swap="outerHTML"><span class="nav__icon">◈</span>All<span class="nav__count">{{.Total}}</span></a></li>
+        {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
     {{if .TopTags}}
     <div class="panel__section">
       <div class="panel__label">Tags</div>
       <ul class="nav">
-        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" onclick="closeMenu()"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" hx-swap="outerHTML"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
     {{end}}
     <div class="panel__footer">
-      <div class="theme-row"><button class="theme-btn" onclick="setTheme('dark')">Dark</button><button class="theme-btn" onclick="setTheme('light')">Light</button></div>
+      <div class="theme-row"><button class="theme-btn" data-set-theme="dark">Dark</button><button class="theme-btn" data-set-theme="light">Light</button></div>
       <span>/ search · esc close</span>
     </div>
   </aside>
   <main class="main">
     <div class="topbar">
-      <button class="menu-btn" onclick="toggleMenu()">☰</button>
-      <div class="search"><input type="search" name="q" placeholder="Search stories, feeds, tags" hx-get="/search" hx-trigger="input changed delay:300ms, search" hx-target="#stream" autocomplete="off"></div>
+      <button class="menu-btn" aria-label="Menu">☰</button>
+      <div class="search"><input type="search" name="q" placeholder="Search stories, feeds, tags" hx-get="/search" hx-trigger="input changed delay:300ms, search" hx-target="#stream" hx-swap="outerHTML" autocomplete="off"></div>
       <div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span></div>
     </div>
     <div class="header">
