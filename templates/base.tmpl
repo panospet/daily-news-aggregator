@@ -166,6 +166,12 @@ button { font:inherit; color:inherit; background:none; border:none; cursor:point
 .layout { display:grid; grid-template-columns:240px 1fr; min-height:100vh; }
 .panel { background:var(--panel); border-right:1px solid var(--line); padding:24px 16px; position:sticky; top:0; height:100vh; overflow-y:auto; }
 .panel__brand { font-weight:700; font-size:20px; letter-spacing:-0.03em; margin-bottom:28px; }
+.panel__brand:hover { color:var(--acc); }
+.topgrid-head { margin-bottom:20px; }
+.topgrid-title { font-size:22px; font-weight:700; letter-spacing:-0.02em; }
+.topgrid-sub { font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:4px; }
+.cat-chip { display:inline-block; font-size:11px; font-weight:600; padding:3px 10px; border-radius:99px; background:var(--card-open); border:1px solid var(--line); color:var(--muted); margin-bottom:12px; transition:0.15s; }
+.cat-chip:hover { border-color:var(--acc); color:var(--text); }
 .panel__section { margin-bottom:20px; }
 .panel__label { font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:0.1em; color:var(--dim); margin-bottom:10px; }
 .nav { list-style:none; }
@@ -283,11 +289,10 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
 <div id="backdrop" class="backdrop"></div>
 <div class="layout">
   <aside id="panel" class="panel">
-    <div class="panel__brand">news flow</div>
+    <a class="panel__brand" href="/" hx-get="/" hx-target="#stream" hx-swap="outerHTML" hx-push-url="/">news flow</a>
     <div class="panel__section">
       <div class="panel__label">Topics</div>
       <ul class="nav">
-        <li><a class="nav__item nav__item--active" href="/" hx-get="/filter?cat=all" hx-target="#stream" hx-swap="outerHTML"><span class="nav__icon">◈</span>All<span class="nav__count">{{.Total}}</span></a></li>
         {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
@@ -295,7 +300,7 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
     <div class="panel__section">
       <div class="panel__label">Tags</div>
       <ul class="nav">
-        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" hx-swap="outerHTML"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+        {{range .TopTags}}<li><a class="nav__item" href="/search?q=%23{{.Tag | urlquery}}" hx-get="/search?q=%23{{.Tag | urlquery}}" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true"><span class="nav__icon">#</span>{{.Tag}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
     {{end}}

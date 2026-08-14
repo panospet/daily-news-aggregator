@@ -6,6 +6,8 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -55,14 +57,15 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /feedback/positive", s.HandlePositiveFeedback)
 }
 
-// Cards serves paginated cards for infinite scroll.
+// Cards serves paginated cards for infinite scroll, either per category
+// (cat=) or across categories for hashtag views (tag=).
 func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	cat := r.URL.Query().Get("cat")
+	tag := strings.ToLower(r.URL.Query().Get("tag"))
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
 	if offset < 0 {
 		offset = 0
 	}
-	const limit = 10
 
 	data, err := s.GetDataWithFallback()
 	if err != nil {
@@ -71,36 +74,54 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-cache")
 
-	var catGroups []struct {
+	type item struct {
 		Category string
 		Group    models.AIGroup
 	}
-	for _, cg := range data.Categories {
-		if cat == "" || cat == "all" || strings.EqualFold(cg.Category, cat) {
+	var items []item
+	limit := 10
+	if tag != "" {
+		limit = 40
+		for _, cg := range data.Categories {
 			for _, g := range cg.Groups {
-				catGroups = append(catGroups, struct {
-					Category string
-					Group    models.AIGroup
-				}{Category: cg.Category, Group: g})
+				for _, t := range g.Tags {
+					if strings.Contains(strings.ToLower(t), tag) {
+						items = append(items, item{Category: cg.Category, Group: g})
+						break
+					}
+				}
+			}
+		}
+	} else {
+		for _, cg := range data.Categories {
+			if cat == "" || cat == "all" || strings.EqualFold(cg.Category, cat) {
+				for _, g := range cg.Groups {
+					items = append(items, item{Category: cg.Category, Group: g})
+				}
 			}
 		}
 	}
 
 	end := offset + limit
-	if end > len(catGroups) {
-		end = len(catGroups)
+	if end > len(items) {
+		end = len(items)
 	}
-	batch := catGroups[offset:end]
+	batch := items[offset:end]
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	for _, item := range batch {
-		_ = s.Tpl.Partial.ExecuteTemplate(w, "card", item)
+	for _, it := range batch {
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "card", it)
 	}
-	if end < len(catGroups) {
-		next := strconv.Itoa(end)
-		_ = s.Tpl.Partial.ExecuteTemplate(w, "cards-sentinel", map[string]interface{}{"cat": cat, "offset": next})
+	if end < len(items) {
+		var nextURL string
+		if tag != "" {
+			nextURL = "/cards?tag=" + url.QueryEscape(tag) + "&offset=" + strconv.Itoa(end)
+		} else {
+			nextURL = "/cards?cat=" + url.QueryEscape(cat) + "&offset=" + strconv.Itoa(end)
+		}
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "cards-sentinel", map[string]interface{}{"url": nextURL})
 	}
-	if offset == 0 && len(catGroups) == 0 {
+	if offset == 0 && len(items) == 0 {
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "cards-empty", nil)
 	}
 }
@@ -140,7 +161,8 @@ func (s *Server) CardBody(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "Not found", http.StatusNotFound)
 }
 
-// Home serves the main dashboard page.
+// Home serves the main dashboard page: a flat grid of the most
+// important groups (most sources) across all categories.
 func (s *Server) Home(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Vary", "HX-Request")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -151,13 +173,58 @@ func (s *Server) Home(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view := topView(*aiData)
+
 	if r.Header.Get("HX-Request") == "true" {
 		w.Header().Set("HX-Push-Url", "/")
-		_ = s.Tpl.Partial.ExecuteTemplate(w, "articles", aiData)
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "articles", view)
 		return
 	}
 
-	_ = s.Tpl.Base.ExecuteTemplate(w, "base", aiData)
+	_ = s.Tpl.Base.ExecuteTemplate(w, "base", view)
+}
+
+// topView builds the flat "Top Stories" homepage view: the top N groups
+// ranked by number of distinct source feeds, tie-broken by article count.
+func topView(data models.AIDashboardData) models.AIDashboardData {
+	const topN = 40
+	type scored struct {
+		cat      string
+		group    models.AIGroup
+		feeds    int
+		articles int
+	}
+	var all []scored
+	for _, cg := range data.Categories {
+		for _, g := range cg.Groups {
+			feeds := make(map[string]bool)
+			for _, a := range g.Articles {
+				feeds[a.Feed] = true
+			}
+			all = append(all, scored{cat: cg.Category, group: g, feeds: len(feeds), articles: len(g.Articles)})
+		}
+	}
+	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].feeds != all[j].feeds {
+			return all[i].feeds > all[j].feeds
+		}
+		return all[i].articles > all[j].articles
+	})
+	if len(all) > topN {
+		all = all[:topN]
+	}
+	view := models.AIDashboardData{
+		Total:      len(all),
+		Generated:  data.Generated,
+		IsFallback: data.IsFallback,
+		TopTags:    data.TopTags,
+		Categories: data.Categories,
+		View:       "top",
+	}
+	for _, s := range all {
+		view.TopGroups = append(view.TopGroups, models.TopGroup{Category: s.cat, Group: s.group})
+	}
+	return view
 }
 
 // CategoryFilter serves filtered articles by category.
@@ -185,6 +252,7 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 	filtered.Generated = data.Generated
 	filtered.IsFallback = data.IsFallback
 	filtered.TopTags = data.TopTags
+	filtered.View = "category"
 
 	// HTMX request: return only the articles partial
 	if r.Header.Get("HX-Request") == "true" {
@@ -195,53 +263,90 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 	_ = s.Tpl.Base.ExecuteTemplate(w, "base", filtered)
 }
 
-// Search handles article search queries.
+// tagView reuses search matching for hashtag clicks: matched groups keep
+// their original category so cards carry the right chip.
+func tagView(data models.AIDashboardData, q string) models.AIDashboardData {
+	var filtered models.AIDashboardData
+	filtered.Generated = data.Generated
+	filtered.TopTags = data.TopTags
+	filtered.Categories = data.Categories // sidebar nav; stream renders TopGroups in this view
+	filtered.View = "tags"
+	for _, g := range data.Categories {
+		for _, grp := range g.Groups {
+			tagMatched := false
+			for _, t := range grp.Tags {
+				if strings.Contains(strings.ToLower(t), q) {
+					tagMatched = true
+					break
+				}
+			}
+			if tagMatched {
+				filtered.TopGroups = append(filtered.TopGroups, models.TopGroup{Category: g.Category, Group: grp})
+				filtered.Total++
+			}
+		}
+	}
+	return filtered
+}
+
+// Search handles article and hashtag search queries. Hashtag queries
+// (q starts with #) render the flat chip view; text queries render
+// category sections.
 func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
-	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	raw := strings.TrimSpace(r.URL.Query().Get("q"))
+	q := strings.ToLower(raw)
 	data, err := s.GetDataWithFallback()
 	if err != nil {
 		http.Error(w, "Database error", http.StatusInternalServerError)
 		return
 	}
+	w.Header().Set("Vary", "HX-Request")
 	w.Header().Set("Cache-Control", "no-cache")
 
+	// Empty query renders the homepage top view.
 	if q == "" {
+		view := topView(*data)
 		if r.Header.Get("HX-Request") == "true" {
-			_ = s.Tpl.Partial.ExecuteTemplate(w, "articles", data)
+			w.Header().Set("HX-Push-Url", "/")
+			_ = s.Tpl.Partial.ExecuteTemplate(w, "articles", view)
 			return
 		}
-		_ = s.Tpl.Base.ExecuteTemplate(w, "base", data)
+		_ = s.Tpl.Base.ExecuteTemplate(w, "base", view)
 		return
 	}
 
 	var filtered models.AIDashboardData
 	filtered.Generated = data.Generated
 	filtered.TopTags = data.TopTags
-	for _, g := range data.Categories {
-		var matchedGroups []models.AIGroup
-		for _, grp := range g.Groups {
-			tagMatched := false
-			for _, t := range grp.Tags {
-				if strings.Contains(strings.ToLower("#"+t), q) || strings.Contains(strings.ToLower(t), q) {
-					tagMatched = true
-					break
+	if strings.HasPrefix(q, "#") {
+		// Hashtag: flat chip view of matching groups.
+		filtered = tagView(*data, strings.TrimPrefix(q, "#"))
+		filtered.Query = strings.TrimPrefix(raw, "#")
+		filtered.Generated = data.Generated
+		filtered.TopTags = data.TopTags
+	} else {
+		filtered.View = "search"
+		for _, g := range data.Categories {
+			var matchedGroups []models.AIGroup
+			for _, grp := range g.Groups {
+				var matched []models.Article
+				for _, a := range grp.Articles {
+					if strings.Contains(strings.ToLower(a.Title), q) ||
+						strings.Contains(strings.ToLower(a.Feed), q) {
+						matched = append(matched, a)
+					}
+				}
+				if len(matched) > 0 {
+					matchedGroups = append(matchedGroups, models.AIGroup{
+						Topic: grp.Topic, Articles: matched, Count: len(matched),
+						GroupID: grp.GroupID, Tags: grp.Tags,
+					})
+					filtered.Total += len(matched)
 				}
 			}
-
-			var matched []models.Article
-			for _, a := range grp.Articles {
-				if tagMatched || strings.Contains(strings.ToLower(a.Title), q) ||
-					strings.Contains(strings.ToLower(a.Feed), q) {
-					matched = append(matched, a)
-				}
+			if len(matchedGroups) > 0 {
+				filtered.Categories = append(filtered.Categories, models.AICategoryGroup{Category: g.Category, Groups: matchedGroups, Count: len(matchedGroups)})
 			}
-			if len(matched) > 0 {
-				matchedGroups = append(matchedGroups, models.AIGroup{Topic: grp.Topic, Articles: matched, Count: len(matched)})
-				filtered.Total += len(matched)
-			}
-		}
-		if len(matchedGroups) > 0 {
-			filtered.Categories = append(filtered.Categories, models.AICategoryGroup{Category: g.Category, Groups: matchedGroups, Count: len(matchedGroups)})
 		}
 	}
 

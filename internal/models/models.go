@@ -45,6 +45,13 @@ type AICategoryGroup struct {
 	Count    int       `json:"count"`
 }
 
+// TopGroup pairs a topic group with its display category for the
+// flat "Top Stories" homepage grid.
+type TopGroup struct {
+	Category string
+	Group    AIGroup
+}
+
 // TagCount represents a tag and its frequency.
 type TagCount struct {
 	Tag   string `json:"tag"`
@@ -58,6 +65,9 @@ type AIDashboardData struct {
 	Generated  string            `json:"generated"`
 	IsFallback bool              `json:"is_fallback,omitempty"`
 	TopTags    []TagCount        `json:"top_tags,omitempty"`
+	TopGroups  []TopGroup        `json:"-"`
+	View       string            `json:"-"`
+	Query      string            `json:"-"`
 }
 
 // AISummaryResult contains the AI-generated summary for a topic group.
