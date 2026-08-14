@@ -214,7 +214,8 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 		log.Printf("[timing] fetchFresh: %d total articles", len(allArticles))
 
 		if len(allArticles) == 0 {
-			return &models.AIDashboardData{Categories: []models.AICategoryGroup{}, Total: 0, Generated: time.Now().Format("15:04:05")}, nil
+			loc, _ := time.LoadLocation("Europe/Athens")
+			return &models.AIDashboardData{Categories: []models.AICategoryGroup{}, Total: 0, Generated: time.Now().In(loc).Format("15:04:05")}, nil
 		}
 
 		t0 := time.Now()
@@ -249,10 +250,11 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 			return topTags[i].Count > topTags[j].Count
 		})
 
+		loc, _ := time.LoadLocation("Europe/Athens")
 		return &models.AIDashboardData{
 			Categories: groups,
 			Total:      total,
-			Generated:  time.Now().Format("15:04:05"),
+			Generated:  time.Now().In(loc).Format("15:04:05"),
 			TopTags:    topTags,
 		}, nil
 	}

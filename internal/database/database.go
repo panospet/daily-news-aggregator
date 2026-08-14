@@ -136,7 +136,8 @@ func (r *Repository) QueryArticles(hours int) (*models.DashboardData, error) {
 		groups = append(groups, models.CategoryGroup{Category: cat, Articles: arts, Count: len(arts)})
 	}
 
-	return &models.DashboardData{Categories: groups, Total: len(ordered), Generated: time.Now().Format("15:04:05")}, nil
+	loc, _ := time.LoadLocation("Europe/Athens")
+	return &models.DashboardData{Categories: groups, Total: len(ordered), Generated: time.Now().In(loc).Format("15:04:05")}, nil
 }
 
 // TimeAgo returns a human-readable relative time string.
@@ -158,7 +159,8 @@ func TimeAgo(t time.Time) string {
 		}
 		return fmt.Sprintf("%d hours ago", h)
 	default:
-		return t.Format("Jan 2 15:04")
+		loc, _ := time.LoadLocation("Europe/Athens")
+		return t.In(loc).Format("Jan 2 15:04")
 	}
 }
 
