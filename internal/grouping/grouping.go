@@ -3,6 +3,7 @@ package grouping
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
@@ -28,11 +29,15 @@ func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICatego
 
 	client := &http.Client{Timeout: 1200 * time.Second}
 	resp, err := client.Post("http://127.0.0.1:8001/cluster", "application/json", bytes.NewBuffer(reqBody))
-	if err != nil || resp.StatusCode != 200 {
+	if err != nil {
 		log.Printf("[clustering] AI service call failed: %v", err)
-		return s.fallbackFlat(allArticles), nil
+		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		log.Printf("[clustering] AI service call failed with status: %d", resp.StatusCode)
+		return nil, fmt.Errorf("AI service returned status %d", resp.StatusCode)
+	}
 
 	var data models.AIDashboardData
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
