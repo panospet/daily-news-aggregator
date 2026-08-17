@@ -40,7 +40,7 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
   5. Identify the correct `AI_DISTANCE_THRESHOLD` required to separate/group them properly and inform the user.
 
 ### 5. Mark as Read
-- A group is marked as "read" when the user **both expands it AND requests a summary** (via the "✨ Summarize Topic" button).
+- A group is marked as "read" when the user **closes a card that was summarized** (via the "✨ Summarize Topic" button). The summary stays fully readable while open — the gray/erased state only applies once the card is closed (click head or Esc).
 - Read groups appear grayed out (reduced opacity, desaturated via CSS `grayscale()` filter) with a small ✓ badge on the expand icon.
 - A "📬 Σήμανση ως μη αναγνωσμένο" (Mark Unread) button appears on read groups to revert them.
 - Read state is stored in `localStorage` keyed by `groupID:articleCount`, so if a new article is added to the group (changing the count), the group automatically becomes unread again.
@@ -223,3 +223,4 @@ docker logs miniflux-dashboard --tail 50
 6. **Fallback flat view**: If the AI service is down (model downloading, OOM, restart), the dashboard silently serves the flat `article_cache` with old category names (`ειδήσεις Κόσμος` etc.) and every article appears as its own group with count=1. This is by design.
 7. **The dashboard is available at `http://rakos:8080`** (the hostname of the machine running Docker).
 8. **Gemini JSON errors**: Gemini occasionally returns malformed JSON (duplicate suffixes). The code handles this gracefully and falls back to the original article title.
+9. **Duplicate cards (multi-category groups)**: `ai/main.py` intentionally adds each group to EVERY core category it was tagged with (`for cat in group["core_tags"]`), so the same group_id appears in 2-3 categories. Any view that MERGES categories MUST dedupe by `group_id` (and skip empty group_ids — fallback data has none): `topView()` (homepage), `Cards()` (infinite scroll, cat="" / tag=), `tagView()` (hashtag search). Per-category views (`/filter?cat=X`, category sections in search) intentionally show the group once per category. Fixed Aug 2026.
