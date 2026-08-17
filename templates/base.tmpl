@@ -36,12 +36,18 @@ function openCard(card) {
         body.classList.remove('card__body--loading');
       });
   }
+}
+
+function closeCard(card) {
+  card.classList.remove('card--open');
+  // Only mark read once the user is done reading: gray out on close,
+  // not while the summary is open on screen.
   if (card.dataset.summarized === 'true') markAsRead(card);
 }
 
 function toggleCard(card) {
   if (card.classList.contains('card--open')) {
-    card.classList.remove('card--open');
+    closeCard(card);
   } else {
     openCard(card);
   }
@@ -136,7 +142,7 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault(); document.querySelector('.search input')?.focus();
   }
   if (e.key === 'Escape') {
-    document.querySelectorAll('.card--open').forEach(function(x) { x.classList.remove('card--open'); });
+    document.querySelectorAll('.card--open').forEach(function(x) { closeCard(x); });
     closeMenu();
   }
 });
@@ -147,7 +153,6 @@ document.addEventListener('htmx:afterSwap', function(e) {
 document.addEventListener('htmx:load', function(e) {
   var card = e.detail.elt;
   if (card && card.classList && card.classList.contains('card') && card.classList.contains('card--open') && card.dataset.summarized === 'true') {
-    markAsRead(card);
     setTimeout(function() { card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, 100);
   }
 });

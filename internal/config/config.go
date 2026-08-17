@@ -5,8 +5,6 @@ import (
 	"strconv"
 )
 
-
-
 // Config holds all application configuration values.
 type Config struct {
 	DBHost       string

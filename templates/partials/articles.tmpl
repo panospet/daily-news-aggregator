@@ -1,10 +1,10 @@
 {{define "articles"}}
 <div id="stream" hx-boost="true" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true">
 {{if .IsFallback}}<div class="notice-banner">⏳ AI grouping is running in the background. Showing raw articles temporarily.</div>{{end}}
-{{if or (eq .View "top") (eq .View "tags")}}
+{{if or (eq .View "top") (eq .View "tags") (eq .View "search")}}
 <div class="topgrid-head">
   <div class="topgrid-title">{{if eq .View "top"}}Top Stories{{else}}Results{{end}}</div>
-  <div class="topgrid-sub">{{.Total}} {{if eq .Total 1}}story group{{else}}story groups{{end}} · {{if eq .View "top"}}most sources first{{else}}matching groups{{end}}</div>
+  <div class="topgrid-sub">{{.Total}} {{if eq .Total 1}}story group{{else}}story groups{{end}} · {{if eq .View "top"}}most related articles first{{else}}matching groups{{end}}</div>
 </div>
 <div class="cards topgrid">
   {{range $idx, $tg := .TopGroups}}

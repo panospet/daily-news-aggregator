@@ -34,7 +34,7 @@ Return JSON: {"summary": "Περίληψη... \n\n Επόμενη παράγρα
 	sb.WriteString(template)
 
 	htmlRegex := regexp.MustCompile(`<[^>]*>`)
-	
+
 	type articleData struct {
 		Title    string
 		Feed     string
@@ -42,10 +42,10 @@ Return JSON: {"summary": "Περίληψη... \n\n Επόμενη παράγρα
 		URL      string
 		Words    []string
 	}
-	
+
 	var parsedData []articleData
 	totalWords := 0
-	
+
 	for _, a := range articles {
 		plainContent := htmlRegex.ReplaceAllString(a.Content, " ")
 		words := strings.Fields(plainContent)
@@ -58,16 +58,16 @@ Return JSON: {"summary": "Περίληψη... \n\n Επόμενη παράγρα
 		})
 		totalWords += len(words)
 	}
-	
-	// Gemini 2.5 Flash Lite context is 1M tokens (~750k words). 
+
+	// Gemini 2.5 Flash Lite context is 1M tokens (~750k words).
 	// We'll consider 500k words as the absolute safety capacity, and 80% of that is 400k.
 	const contextCapacity = 500000
 	const targetCapacity = int(contextCapacity * 0.8) // 400,000 words
-	
+
 	if totalWords > contextCapacity {
 		excessWords := totalWords - targetCapacity
 		wordsToCutPerArticle := excessWords / len(parsedData)
-		
+
 		for i := range parsedData {
 			if len(parsedData[i].Words) > wordsToCutPerArticle {
 				// Cut equally from the end
@@ -77,7 +77,7 @@ Return JSON: {"summary": "Περίληψη... \n\n Επόμενη παράγρα
 			}
 		}
 	}
-	
+
 	for i, pd := range parsedData {
 		contentStr := strings.Join(pd.Words, " ")
 		sb.WriteString(fmt.Sprintf("[%d] Title: %s\n   Source: %s (%s)\n   URL: %s\n   Content: %s\n\n", i+1, pd.Title, pd.Feed, pd.Category, pd.URL, contentStr))

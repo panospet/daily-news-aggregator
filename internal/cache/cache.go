@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -17,6 +18,68 @@ import (
 	"github.com/panospet/daily-news-aggregator/internal/models"
 	"github.com/redis/go-redis/v9"
 )
+
+// ---------- Article-to-Group Mapping (Redis DB 1) ----------
+
+type GroupMapping struct {
+	client *redis.Client
+}
+
+func NewGroupMapping(addr string) *GroupMapping {
+	client := redis.NewClient(&redis.Options{
+		Addr: addr,
+		DB:   1, // Use Redis DB 1 for group mappings
+	})
+	return &GroupMapping{client: client}
+}
+
+// Save stores article_id -> group_id mappings. Replaces all existing mappings.
+func (m *GroupMapping) Save(mapping map[int64]string) error {
+	if len(mapping) == 0 {
+		return nil
+	}
+	ctx := context.Background()
+	pipe := m.client.Pipeline()
+
+	// Clear old mappings
+	pipe.Del(ctx, "article_groups")
+
+	// Store new mappings
+	fields := make(map[string]interface{}, len(mapping))
+	for articleID, groupID := range mapping {
+		fields[strconv.FormatInt(articleID, 10)] = groupID
+	}
+	pipe.HSet(ctx, "article_groups", fields)
+	pipe.Expire(ctx, "article_groups", 2*time.Hour) // slightly longer than ai_cache TTL
+
+	_, err := pipe.Exec(ctx)
+	return err
+}
+
+// GetGroupIDs returns group_id for each given article_id.
+func (m *GroupMapping) GetGroupIDs(articleIDs []int64) (map[int64]string, error) {
+	if len(articleIDs) == 0 {
+		return nil, nil
+	}
+	ctx := context.Background()
+	fields := make([]string, len(articleIDs))
+	for i, id := range articleIDs {
+		fields[i] = strconv.FormatInt(id, 10)
+	}
+
+	vals, err := m.client.HMGet(ctx, "article_groups", fields...).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	result := make(map[int64]string)
+	for i, v := range vals {
+		if v != nil {
+			result[articleIDs[i]] = v.(string)
+		}
+	}
+	return result, nil
+}
 
 type RedisWrapper[T any] struct {
 	Data T         `json:"data"`
@@ -142,11 +205,11 @@ func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDas
 
 	wrapper := RedisWrapper[*models.AIDashboardData]{Data: newData, Ts: time.Now()}
 	bytes, _ := json.Marshal(wrapper)
-	
+
 	c.refreshMutex.Lock()
 	c.client.Set(ctx, "ai_cache", bytes, 0)
 	c.refreshMutex.Unlock()
-	
+
 	log.Printf("AI cache refreshed — %d articles in %d categories", newData.Total, len(newData.Categories))
 }
 
@@ -197,7 +260,7 @@ func (c *AICache) UpdateTopic(category string, groupID string, newTopic string) 
 }
 
 func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Service,
-	retryFn func(hours int) (*models.DashboardData, error)) func(db *sql.DB) (*models.AIDashboardData, error) {
+	retryFn func(hours int) (*models.DashboardData, error), groupMap *GroupMapping) func(db *sql.DB) (*models.AIDashboardData, error) {
 
 	return func(db *sql.DB) (*models.AIDashboardData, error) {
 		log.Printf("[timing] fetchFresh: starting DB query")
@@ -227,6 +290,23 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 			time.Since(t0).Round(time.Second), len(groups), grouping.CountCatGroups(groups))
 
 		grouping.AssignGroupIDs(groups)
+
+		// Build article -> group mapping for Redis DB 1
+		if groupMap != nil {
+			mapping := make(map[int64]string)
+			for _, catGrp := range groups {
+				for _, grp := range catGrp.Groups {
+					for _, art := range grp.Articles {
+						mapping[art.ID] = grp.GroupID
+					}
+				}
+			}
+			if err := groupMap.Save(mapping); err != nil {
+				log.Printf("Warning: failed to save article-group mapping: %v", err)
+			} else {
+				log.Printf("[groupMap] Saved %d article-to-group mappings in Redis DB 1", len(mapping))
+			}
+		}
 
 		total := 0
 		tagFreq := make(map[string]int)

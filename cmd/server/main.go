@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	_ "github.com/lib/pq"
+	"github.com/redis/go-redis/v9"
 
 	htmxdailynews "github.com/panospet/daily-news-aggregator"
 	"github.com/panospet/daily-news-aggregator/internal/cache"
@@ -77,7 +77,7 @@ func main() {
 	}
 
 	repo := &database.Repository{DB: db}
-	groupSvc := &grouping.Service{Gemini: geminiClient}
+	groupSvc := &grouping.Service{Gemini: geminiClient, Repo: repo}
 	summarizeSvc := &summarize.Service{Gemini: geminiClient}
 
 	// Build the retry function (used for DB queries)
@@ -85,7 +85,8 @@ func main() {
 		return repo.QueryArticles(hours)
 	}
 
-	fetchFn := cache.FetchFresh(db, repo, groupSvc, retryFn)
+	groupMap := cache.NewGroupMapping("127.0.0.1:6379")
+	fetchFn := cache.FetchFresh(db, repo, groupSvc, retryFn, groupMap)
 
 	redisClient := redis.NewClient(&redis.Options{
 		Addr: "127.0.0.1:6379",
@@ -97,14 +98,16 @@ func main() {
 	}
 
 	srv := &handler.Server{
-		Cfg:         cfg,
-		DB:          db,
-		Tpl:         tpl,
-		Cache:       cache.NewArticleCache(redisClient, 2*time.Minute),
-		AICache:     cache.NewAICache(redisClient, 60*time.Minute),
-		Summarizer:  summarizeSvc,
-		FetchFn:     fetchFn,
-		RetryFn:     retryFn,
+		Cfg:        cfg,
+		DB:         db,
+		Tpl:        tpl,
+		Cache:      cache.NewArticleCache(redisClient, 2*time.Minute),
+		AICache:    cache.NewAICache(redisClient, 60*time.Minute),
+		GroupMap:   groupMap,
+		Summarizer: summarizeSvc,
+		FetchFn:    fetchFn,
+		RetryFn:    retryFn,
+		Repo:       repo,
 	}
 
 	mux := http.NewServeMux()

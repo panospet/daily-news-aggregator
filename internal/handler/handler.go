@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"html/template"
@@ -10,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/panospet/daily-news-aggregator/internal/cache"
 	"github.com/panospet/daily-news-aggregator/internal/config"
@@ -25,9 +27,11 @@ type Server struct {
 	Tpl        *TemplateSet
 	Cache      *cache.ArticleCache
 	AICache    *cache.AICache
+	GroupMap   *cache.GroupMapping
 	Summarizer *summarize.Service
 	FetchFn    func(db *sql.DB) (*models.AIDashboardData, error)
 	RetryFn    func(hours int) (*models.DashboardData, error)
+	Repo       *database.Repository
 }
 
 // GetDataWithFallback fetches AI data, falling back to flat data if AI cache is empty or refreshing.
@@ -101,6 +105,24 @@ func (s *Server) Cards(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	// Deduplicate across categories: multi-tagged groups appear in every
+	// category they were tagged with, so merged views must render each
+	// story group once (empty group_id = fallback data, keep all).
+	seen := make(map[string]bool)
+	unique := items[:0]
+	for _, it := range items {
+		if it.Group.GroupID != "" && seen[it.Group.GroupID] {
+			continue
+		}
+		seen[it.Group.GroupID] = true
+		unique = append(unique, it)
+	}
+	items = unique
+
+	sort.SliceStable(items, func(i, j int) bool {
+		return items[i].Group.Count > items[j].Group.Count
+	})
 
 	end := offset + limit
 	if end > len(items) {
@@ -195,8 +217,15 @@ func topView(data models.AIDashboardData) models.AIDashboardData {
 		articles int
 	}
 	var all []scored
+	// The AI service multi-tags groups across categories, so the same story
+	// group can appear under several categories. Render each group once.
+	seen := make(map[string]bool)
 	for _, cg := range data.Categories {
 		for _, g := range cg.Groups {
+			if g.GroupID != "" && seen[g.GroupID] {
+				continue
+			}
+			seen[g.GroupID] = true
 			feeds := make(map[string]bool)
 			for _, a := range g.Articles {
 				feeds[a.Feed] = true
@@ -205,10 +234,10 @@ func topView(data models.AIDashboardData) models.AIDashboardData {
 		}
 	}
 	sort.SliceStable(all, func(i, j int) bool {
-		if all[i].feeds != all[j].feeds {
-			return all[i].feeds > all[j].feeds
+		if all[i].articles != all[j].articles {
+			return all[i].articles > all[j].articles
 		}
-		return all[i].articles > all[j].articles
+		return all[i].feeds > all[j].feeds
 	})
 	if len(all) > topN {
 		all = all[:topN]
@@ -244,8 +273,14 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 	} else {
 		for _, g := range data.Categories {
 			if strings.EqualFold(g.Category, cat) {
-				filtered.Categories = append(filtered.Categories, g)
-				filtered.Total = g.Count
+				gCopy := g
+				gCopy.Groups = make([]models.AIGroup, len(g.Groups))
+				copy(gCopy.Groups, g.Groups)
+				sort.SliceStable(gCopy.Groups, func(i, j int) bool {
+					return gCopy.Groups[i].Count > gCopy.Groups[j].Count
+				})
+				filtered.Categories = append(filtered.Categories, gCopy)
+				filtered.Total = gCopy.Count
 			}
 		}
 	}
@@ -271,6 +306,9 @@ func tagView(data models.AIDashboardData, q string) models.AIDashboardData {
 	filtered.TopTags = data.TopTags
 	filtered.Categories = data.Categories // sidebar nav; stream renders TopGroups in this view
 	filtered.View = "tags"
+	// Deduplicate by group_id: the same multi-tagged group can match from
+	// several categories; render each story group once.
+	seen := make(map[string]bool)
 	for _, g := range data.Categories {
 		for _, grp := range g.Groups {
 			tagMatched := false
@@ -281,11 +319,18 @@ func tagView(data models.AIDashboardData, q string) models.AIDashboardData {
 				}
 			}
 			if tagMatched {
+				if grp.GroupID != "" && seen[grp.GroupID] {
+					continue
+				}
+				seen[grp.GroupID] = true
 				filtered.TopGroups = append(filtered.TopGroups, models.TopGroup{Category: g.Category, Group: grp})
 				filtered.Total++
 			}
 		}
 	}
+	sort.SliceStable(filtered.TopGroups, func(i, j int) bool {
+		return filtered.TopGroups[i].Group.Count > filtered.TopGroups[j].Group.Count
+	})
 	return filtered
 }
 
@@ -325,27 +370,46 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 		filtered.Generated = data.Generated
 		filtered.TopTags = data.TopTags
 	} else {
-		filtered.View = "search"
-		for _, g := range data.Categories {
-			var matchedGroups []models.AIGroup
-			for _, grp := range g.Groups {
-				var matched []models.Article
-				for _, a := range grp.Articles {
-					if strings.Contains(strings.ToLower(a.Title), q) ||
-						strings.Contains(strings.ToLower(a.Feed), q) {
-						matched = append(matched, a)
+		// Semantic search via embeddings
+		groups := s.semanticSearch(raw, data)
+		if groups != nil {
+			filtered.View = "search"
+			filtered.Categories = data.Categories // for sidebar
+			filtered.TopGroups = groups
+			for _, g := range groups {
+				filtered.Total += g.Group.Count
+			}
+		} else {
+			// Fallback to substring matching if semantic search fails
+			// Don't set View="search" here — that renders TopGroups (empty).
+			// Leave View="" so the template renders Categories sections.
+			qNorm := stripAccents(q)
+			for _, g := range data.Categories {
+				var matchedGroups []models.AIGroup
+				for _, grp := range g.Groups {
+					var matched []models.Article
+					for _, a := range grp.Articles {
+						titleNorm := stripAccents(strings.ToLower(a.Title))
+						feedNorm := stripAccents(strings.ToLower(a.Feed))
+						if strings.Contains(titleNorm, qNorm) ||
+							strings.Contains(feedNorm, qNorm) {
+							matched = append(matched, a)
+						}
+					}
+					if len(matched) > 0 {
+						matchedGroups = append(matchedGroups, models.AIGroup{
+							Topic: grp.Topic, Articles: matched, Count: len(matched),
+							GroupID: grp.GroupID, Tags: grp.Tags,
+						})
+						filtered.Total += len(matched)
 					}
 				}
-				if len(matched) > 0 {
-					matchedGroups = append(matchedGroups, models.AIGroup{
-						Topic: grp.Topic, Articles: matched, Count: len(matched),
-						GroupID: grp.GroupID, Tags: grp.Tags,
-					})
-					filtered.Total += len(matched)
+				sort.SliceStable(matchedGroups, func(i, j int) bool {
+					return matchedGroups[i].Count > matchedGroups[j].Count
+				})
+				if len(matchedGroups) > 0 {
+					filtered.Categories = append(filtered.Categories, models.AICategoryGroup{Category: g.Category, Groups: matchedGroups, Count: len(matchedGroups)})
 				}
-			}
-			if len(matchedGroups) > 0 {
-				filtered.Categories = append(filtered.Categories, models.AICategoryGroup{Category: g.Category, Groups: matchedGroups, Count: len(matchedGroups)})
 			}
 		}
 	}
@@ -357,6 +421,134 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 	}
 	// Full page load: render base template with matched data
 	_ = s.Tpl.Base.ExecuteTemplate(w, "base", filtered)
+}
+
+// stripAccents removes Greek diacritical marks (accents) from text.
+// This ensures "ολυμπιακος" matches "ολυμπιακός" in search comparisons.
+func stripAccents(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		if mapped, ok := greekAccentMap[r]; ok {
+			b.WriteRune(mapped)
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// greekAccentMap maps accented Greek characters to their unaccented equivalents.
+var greekAccentMap = map[rune]rune{
+	'ά': 'α', 'έ': 'ε', 'ή': 'η', 'ί': 'ι', 'ό': 'ο', 'ύ': 'υ', 'ώ': 'ω',
+	'Ά': 'Α', 'Έ': 'Ε', 'Ή': 'Η', 'Ί': 'Ι', 'Ό': 'Ο', 'Ύ': 'Υ', 'Ώ': 'Ω',
+	'ΐ': 'ι', 'ΰ': 'υ', 'ϊ': 'ι', 'ϋ': 'υ', 'Ϊ': 'Ι', 'Ϋ': 'Υ',
+}
+
+// semanticSearch performs embedding-based search: embeds the query,
+// finds nearest articles via pgvector, then resolves their groups.
+func (s *Server) semanticSearch(query string, data *models.AIDashboardData) []models.TopGroup {
+	if s.Repo == nil || s.GroupMap == nil {
+		return nil
+	}
+
+	// 1. Get query embeddings from the AI service (may return multiple: original + accent-stripped)
+	reqBody, err := json.Marshal(map[string]string{"query": query})
+	if err != nil {
+		log.Printf("[search] Failed to marshal query: %v", err)
+		return nil
+	}
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Post("http://127.0.0.1:8001/search-embed", "application/json", bytes.NewBuffer(reqBody))
+	if err != nil {
+		log.Printf("[search] Failed to call search-embed: %v", err)
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		log.Printf("[search] search-embed returned status %d", resp.StatusCode)
+		return nil
+	}
+
+	var embedResp struct {
+		Embeddings [][]float32 `json:"embeddings"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&embedResp); err != nil {
+		log.Printf("[search] Failed to decode embeddings: %v", err)
+		return nil
+	}
+	if len(embedResp.Embeddings) == 0 {
+		return nil
+	}
+
+	// 2. Find nearest articles for EACH embedding variant and merge results
+	seenArticle := make(map[int64]bool)
+	var allArticleIDs []int64
+	for i, emb := range embedResp.Embeddings {
+		ids, err := s.Repo.SearchByEmbedding(emb, 50)
+		if err != nil {
+			log.Printf("[search] pgvector search failed for variant %d: %v", i, err)
+			continue
+		}
+		for _, id := range ids {
+			if !seenArticle[id] {
+				seenArticle[id] = true
+				allArticleIDs = append(allArticleIDs, id)
+			}
+		}
+	}
+	if len(allArticleIDs) == 0 {
+		return nil
+	}
+
+	// 3. Look up group IDs from Redis DB 1
+	groupIDs, err := s.GroupMap.GetGroupIDs(allArticleIDs)
+	if err != nil {
+		log.Printf("[search] Failed to fetch group mappings: %v", err)
+		return nil
+	}
+
+	// 4. Find the full group data from the AI cache, preserving result order
+	// Build an ordered, deduplicated list of group IDs
+	seen := make(map[string]bool)
+	var orderedGroupIDs []string
+	for _, artID := range allArticleIDs {
+		gid, ok := groupIDs[artID]
+		if !ok || gid == "" || seen[gid] {
+			continue
+		}
+		seen[gid] = true
+		orderedGroupIDs = append(orderedGroupIDs, gid)
+	}
+
+	// Build a lookup map from the cached data
+	type groupWithCat struct {
+		category string
+		group    models.AIGroup
+	}
+	groupLookup := make(map[string]groupWithCat)
+	for _, cg := range data.Categories {
+		for _, g := range cg.Groups {
+			if g.GroupID != "" {
+				if _, exists := groupLookup[g.GroupID]; !exists {
+					groupLookup[g.GroupID] = groupWithCat{category: cg.Category, group: g}
+				}
+			}
+		}
+	}
+
+	// 5. Assemble results in relevance order
+	var results []models.TopGroup
+	for _, gid := range orderedGroupIDs {
+		if gc, ok := groupLookup[gid]; ok {
+			results = append(results, models.TopGroup{Category: gc.category, Group: gc.group})
+		}
+	}
+
+	log.Printf("[search] Semantic search for %q: %d articles → %d groups (%d embedding variants)", query, len(allArticleIDs), len(results), len(embedResp.Embeddings))
+	return results
 }
 
 // Stats serves the stats partial.

@@ -54,11 +54,11 @@ func main() {
 	model := client.Models.Get("gemini-2.5-flash-lite")
 
 	prompt := "Does this headline announce a newly released song or album? Answer strictly YES or NO.\nHeadline: "
-	
+
 	totalInputTokens := 0
 	totalOutputTokens := 0
 	musicArticles := 0
-	
+
 	fmt.Println("Estimating cost for music articles...")
 
 	for _, category := range data.Data.Categories {
@@ -67,28 +67,28 @@ func main() {
 				for _, article := range group.Articles {
 					musicArticles++
 					fullPrompt := prompt + article.Title
-					
+
 					// Instead of running the inference, we just count the tokens to save API calls
 					// But we will run 1 to verify the structure and get average output tokens
 					if musicArticles == 1 {
-					    resp, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
-                        if err == nil && resp != nil && resp.UsageMetadata != nil {
-                            totalOutputTokens += int(resp.UsageMetadata.CandidatesTokenCount) * 51 // Assumed constant per article
-                        }
+						resp, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
+						if err == nil && resp != nil && resp.UsageMetadata != nil {
+							totalOutputTokens += int(resp.UsageMetadata.CandidatesTokenCount) * 51 // Assumed constant per article
+						}
 					}
-					
+
 					resp, err := client.Models.CountTokens(ctx, "gemini-2.5-flash-lite", genai.Text(fullPrompt))
 					if err != nil {
 						log.Printf("Warning: failed to count tokens: %v", err)
 						totalInputTokens += len(strings.Fields(fullPrompt)) * 2 // Fallback estimate
 					} else {
-					    totalInputTokens += int(resp.TotalTokens)
+						totalInputTokens += int(resp.TotalTokens)
 					}
 				}
 			}
 		}
 	}
-	
+
 	// Gemini 2.5 Flash-Lite pricing (per 1M tokens):
 	// Input: $0.075
 	// Output: $0.30
@@ -103,7 +103,7 @@ func main() {
 	fmt.Printf("Input Cost:  $%.6f\n", inputCost)
 	fmt.Printf("Output Cost: $%.6f\n", outputCost)
 	fmt.Printf("Total Cost:  $%.6f\n", totalCost)
-	
+
 	fmt.Printf("\nEstimated Monthly Cost (2 batches/day x 30 days = 60 batches):\n")
-	fmt.Printf("Monthly Cost: $%.6f\n", totalCost * 60)
+	fmt.Printf("Monthly Cost: $%.6f\n", totalCost*60)
 }
