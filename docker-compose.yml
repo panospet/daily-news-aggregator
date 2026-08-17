@@ -51,7 +51,7 @@ services:
     restart: always
 
   db:
-    image: postgres:15
+    image: pgvector/pgvector:pg15
     ports:
       - "127.0.0.1:5435:5432"
     env_file: .miniflux.env
@@ -95,6 +95,13 @@ services:
       - GUNICORN_CMD_ARGS=--timeout 120
     depends_on:
       - flaresolverr
+    restart: unless-stopped
+
+  wp-adapter:
+    build: ./wp-adapter
+    container_name: wp-adapter
+    ports:
+      - "8008:8000"
     restart: unless-stopped
 
   db-cleanup:
