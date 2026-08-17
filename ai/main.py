@@ -179,7 +179,7 @@ async def call_gemini_batch_categorize(articles, client):
         
     return results
 
-def cluster_super_group(articles):
+def cluster_super_group(articles, precomputed_embeddings=None):
     distance_threshold = float(os.getenv("AI_DISTANCE_THRESHOLD", "0.45"))
     if len(articles) < 2:
         return [[a] for a in articles]
@@ -191,8 +191,33 @@ def cluster_super_group(articles):
         texts.append(f"{a['title'].strip()} {content_snippet}".strip())
     
     t0 = time.time()
-    embeddings_gen = model.embed(texts, batch_size=45)
-    embeddings = np.array(list(embeddings_gen))
+    
+    if precomputed_embeddings is not None:
+        embeddings_list = [None] * len(articles)
+        missing_texts = []
+        missing_indices = []
+        
+        for i, a in enumerate(articles):
+            a_id = str(a.get('id', ''))
+            if a_id and a_id in precomputed_embeddings:
+                embeddings_list[i] = precomputed_embeddings[a_id]
+            else:
+                missing_texts.append(texts[i])
+                missing_indices.append(i)
+                
+        if missing_texts:
+            embeddings_gen = model.embed(missing_texts, batch_size=16)
+            missing_embeddings = list(embeddings_gen)
+            for idx, emb in zip(missing_indices, missing_embeddings):
+                embeddings_list[idx] = emb
+                
+        embeddings = np.array(embeddings_list)
+        reused = len(articles) - len(missing_texts)
+        print(f"Embeddings: reused {reused}, computed {len(missing_texts)}")
+    else:
+        embeddings_gen = model.embed(texts, batch_size=16)
+        embeddings = np.array(list(embeddings_gen))
+        
     t1 = time.time()
     
     dense_distances = cosine_distances(embeddings)
@@ -218,6 +243,13 @@ def cluster_super_group(articles):
     alpha = 0.7
     hybrid_distances = alpha * dense_distances + (1 - alpha) * sparse_distances
 
+    # STRONG MATCH OVERRIDE: 
+    # If the AI embedding is highly confident (distance < 0.35), trust it entirely.
+    # This solves edge cases like transliterated names (e.g. "Hayden Panettiere" vs "Χέιντεν Πανετιέρ")
+    # where the AI knows they are the same, but the TF-IDF keyword matcher applies a massive penalty.
+    strong_match_mask = dense_distances < 0.35
+    hybrid_distances[strong_match_mask] = dense_distances[strong_match_mask]
+
     clustering = AgglomerativeClustering(
         n_clusters=None,
         metric='precomputed',
@@ -234,9 +266,62 @@ def cluster_super_group(articles):
 
     return list(groups_map.values())
 
+@app.post("/embed")
+def embed_articles(data: dict):
+    articles = data.get("articles", [])
+    embeddings_dict = {}
+    
+    if not articles:
+        return {"embeddings": embeddings_dict}
+        
+    texts = []
+    ids = []
+    for a in articles:
+        content = extract_text(a.get("content", ""))
+        content_words = content.split()[:50]
+        content_snippet = " ".join(content_words)
+        texts.append(f"{a.get('title', '').strip()} {content_snippet}".strip())
+        ids.append(str(a.get("id", "")))
+        
+    embeddings_gen = model.embed(texts, batch_size=16)
+    embeddings = list(embeddings_gen)
+    
+    for a_id, emb in zip(ids, embeddings):
+        if a_id:
+            embeddings_dict[a_id] = emb.tolist()
+            
+    return {"embeddings": embeddings_dict}
+
+import unicodedata
+
+def strip_accents(text):
+    """Strip diacritical marks (accents) from Greek text."""
+    nfkd = unicodedata.normalize('NFD', text)
+    return ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
+
+@app.post("/search-embed")
+def search_embed(data: dict):
+    query = data.get("query", "")
+    if not query:
+        return {"embeddings": []}
+    
+    normalized = strip_accents(query)
+    
+    # Embed both original and accent-stripped versions
+    texts = [query]
+    if normalized != query:
+        texts.append(normalized)
+    
+    embeddings_gen = model.embed(texts)
+    embeddings = [e.tolist() for e in embeddings_gen]
+    
+    return {"embeddings": embeddings}
+
+
 @app.post("/cluster")
 def cluster(data: dict):
     raw_articles = data.get("articles", [])
+    precomputed = data.get("embeddings", None)
 
     if not raw_articles:
         return {"categories": [], "total": 0, "generated": time.strftime("%H:%M:%S")}
@@ -246,7 +331,7 @@ def cluster(data: dict):
         a["text"] = extract_text(a.get("content", ""))
         articles.append(a)
 
-    all_clusters = cluster_super_group(articles) if articles else []
+    all_clusters = cluster_super_group(articles, precomputed_embeddings=precomputed) if articles else []
 
     clusters_to_name = []
     singletons = []
