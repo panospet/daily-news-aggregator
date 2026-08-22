@@ -39,7 +39,7 @@ func TestCall_SuccessfulResponse(t *testing.T) {
 	// Override the URL by using CallWithModel with a model that maps to our test server
 	// We need to test the actual flow, so we'll use a custom approach
 	// For proper testing, we test CallWithModel directly through the mock
-	result, err := c.CallWithModel("test prompt", "test-model", 100)
+	result, err := c.CallWithModel("test prompt", "test-model", 100, nil)
 	// This will fail because it hits the real Google URL, not our mock.
 	// So we test the error handling path instead.
 	if err != nil {
@@ -59,7 +59,7 @@ func TestCall_APIError(t *testing.T) {
 	defer server.Close()
 
 	c := &Client{HTTPClient: server.Client(), APIKey: "test-key"}
-	_, err := c.CallWithModel("test", "model", 100)
+	_, err := c.CallWithModel("test", "model", 100, nil)
 	// Will fail connecting to Google's actual URL, not our mock
 	if err == nil {
 		t.Error("expected error for API error response")
@@ -75,7 +75,7 @@ func TestCall_EmptyCandidates(t *testing.T) {
 	defer server.Close()
 
 	c := &Client{HTTPClient: server.Client(), APIKey: "test-key"}
-	_, err := c.CallWithModel("test", "model", 100)
+	_, err := c.CallWithModel("test", "model", 100, nil)
 	if err == nil {
 		t.Error("expected error for empty candidates")
 	}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/panospet/daily-news-aggregator/internal/gemini"
 	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 

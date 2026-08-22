@@ -19,7 +19,7 @@ import html as html_mod
 DB_HOST = os.getenv("MF_DB_HOST", "127.0.0.1")
 DB_PORT = int(os.getenv("MF_DB_PORT", "5435"))
 DB_USER = os.getenv("MF_DB_USER", "miniflux")
-DB_PASS = os.getenv("MF_DB_PASSWORD", "REDACTED")
+DB_PASS = os.getenv("MF_DB_PASSWORD", "")
 DB_NAME = os.getenv("MF_DB_NAME", "miniflux")
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://127.0.0.1:8001")
 

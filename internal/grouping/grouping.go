@@ -18,6 +18,8 @@ import (
 type Service struct {
 	Gemini gemini.Caller
 	Repo   *database.Repository
+	// BaseURL of the Python AI clustering service, e.g. http://127.0.0.1:8001
+	AIServiceURL string
 }
 
 // GroupArticles calls the Python AI service to cluster articles.
@@ -52,7 +54,7 @@ func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICatego
 	}
 
 	client := &http.Client{Timeout: 1200 * time.Second}
-	resp, err := client.Post("http://127.0.0.1:8001/cluster", "application/json", bytes.NewBuffer(reqBody))
+	resp, err := client.Post(s.AIServiceURL+"/cluster", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[clustering] AI service call failed: %v", err)
 		return nil, err
@@ -99,7 +101,7 @@ func (s *Service) computeAndStoreEmbeddings(articles []models.Article) {
 	}
 
 	client := &http.Client{Timeout: 1200 * time.Second}
-	resp, err := client.Post("http://127.0.0.1:8001/embed", "application/json", bytes.NewBuffer(reqBody))
+	resp, err := client.Post(s.AIServiceURL+"/embed", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[embeddings] Failed to call embed endpoint: %v", err)
 		return

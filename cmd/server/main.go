@@ -2,9 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	_ "github.com/lib/pq"
@@ -77,7 +81,7 @@ func main() {
 	}
 
 	repo := &database.Repository{DB: db}
-	groupSvc := &grouping.Service{Gemini: geminiClient, Repo: repo}
+	groupSvc := &grouping.Service{Gemini: geminiClient, Repo: repo, AIServiceURL: cfg.AIServiceURL}
 	summarizeSvc := &summarize.Service{Gemini: geminiClient}
 
 	// Build the retry function (used for DB queries)
@@ -85,11 +89,11 @@ func main() {
 		return repo.QueryArticles(hours)
 	}
 
-	groupMap := cache.NewGroupMapping("127.0.0.1:6379")
+	groupMap := cache.NewGroupMapping(cfg.RedisAddr)
 	fetchFn := cache.FetchFresh(db, repo, groupSvc, retryFn, groupMap)
 
 	redisClient := redis.NewClient(&redis.Options{
-		Addr: "127.0.0.1:6379",
+		Addr: cfg.RedisAddr,
 	})
 	if err := redisClient.Ping(context.Background()).Err(); err != nil {
 		log.Printf("Warning: Redis connection failed: %v", err)
@@ -115,8 +119,30 @@ func main() {
 	mux.Handle("GET /static/", http.StripPrefix("/static/", handler.StaticHandler(htmxdailynews.EmbeddedFS)))
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
-	log.Printf("🤖 Miniflux AI Dashboard starting on http://localhost%s", addr)
-	if err := http.ListenAndServe(addr, basicAuthMiddleware(cfg, handler.GzipMiddleware(mux))); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	httpServer := &http.Server{
+		Addr:    addr,
+		Handler: basicAuthMiddleware(cfg, handler.GzipMiddleware(mux)),
 	}
+
+	// Graceful shutdown: finish in-flight requests (including long AI
+	// clustering calls) on SIGINT/SIGTERM instead of dropping them.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		log.Printf("🤖 Miniflux AI Dashboard starting on http://localhost%s", addr)
+		if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatalf("Server failed: %v", err)
+		}
+	}()
+
+	<-ctx.Done()
+	log.Println("Shutdown signal received — draining connections...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := httpServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Graceful shutdown timed out, forcing close: %v", err)
+	}
+	log.Println("Server stopped cleanly")
 }

@@ -102,21 +102,17 @@ func TestFlatGroupResult(t *testing.T) {
 		"news":   {{Title: "A"}, {Title: "B"}},
 		"sports": {{Title: "C"}},
 	}
-	displayNames := map[string]string{
-		"news":   "ειδήσεις Ελλάδα",
-		"sports": "αθλητικές ειδήσεις",
-	}
 	preferredOrder := []string{"sports", "news"}
 
-	result := FlatGroupResult(catMap, preferredOrder, displayNames)
+	result := FlatGroupResult(catMap, preferredOrder)
 	if len(result) != 2 {
 		t.Fatalf("expected 2 categories, got %d", len(result))
 	}
 	// First should be sports (preferred order)
-	if result[0].Category != "αθλητικές ειδήσεις" {
+	if result[0].Category != "sports" {
 		t.Errorf("expected sports first, got %q", result[0].Category)
 	}
-	if result[1].Category != "ειδήσεις Ελλάδα" {
+	if result[1].Category != "news" {
 		t.Errorf("expected news second, got %q", result[1].Category)
 	}
 }

@@ -115,6 +115,19 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  cloudflared-newspaper:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared-newspaper
+    network_mode: "host"
+    restart: unless-stopped
+    command: tunnel run
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_NEWSPAPER_TOKEN}
+      - TUNNEL_TRANSPORT_PROTOCOL=http2
+
 volumes:
   miniflux-db:
     external: true

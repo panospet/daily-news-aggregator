@@ -1,6 +1,9 @@
 # Binaries
 daily-news-aggregator
 daily-news-aggregator-bin
+htmx-daily-news*
+miniflux-dashboard
+server
 *.exe
 *.exe~
 *.dll
@@ -13,8 +16,25 @@ daily-news-aggregator-bin
 # Output of go coverage
 *.out
 
-# Environment
-.env
+# Environment / secrets
+*.env
+!.env.example
+
+# Logs
+*.log
+
+# Media clutter (screenshots, recordings)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mp4
+
+# Scratch and test data
+feedback.txt
+neg_fb.json
+pos_fb.json
+req.json
 
 # IDE
 .vscode/
@@ -26,7 +46,6 @@ daily-news-aggregator-bin
 .DS_Store
 Thumbs.db
 
-# Scratch and test data
-feedback.txt
-*.json
-htmx-daily-news*
+# Python
+__pycache__/
+*.pyc

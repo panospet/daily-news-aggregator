@@ -124,15 +124,20 @@ async def call_gemini_batch_categorize(articles, client):
         return [{"core_tags": ["Διάφορα"], "custom_tags": []} for _ in articles]
         
     results = [{"core_tags": ["Διάφορα"], "custom_tags": []} for _ in articles]
+
+    # Fire all batches concurrently (bounded) instead of sequentially —
+    # with ~10 batches this cuts categorization from minutes to seconds.
     batch_size = 30
-    
+    max_concurrent = 5
+    semaphore = asyncio.Semaphore(max_concurrent)
+
     async def process_batch(batch_start, batch_articles):
-        try:
-            articles_str = ""
-            for i, a in enumerate(batch_articles):
-                articles_str += f"\nΆρθρο {i}:\nΤίτλος: {a['title']}\nΚείμενο: {a['text'][:200]}\n"
-                
-            prompt = f"""Είσαι βοηθός κατηγοριοποίησης ειδήσεων. Έχω μια λίστα από ανεξάρτητα άρθρα.
+        async with semaphore:
+            try:
+                articles_str = ""
+                for i, a in enumerate(batch_articles):
+                    articles_str += f"\nΆρθρο {i}:\nΤίτλος: {a['title']}\nΚείμενο: {a['text'][:200]}\n"
+                prompt = f"""Είσαι βοηθός κατηγοριοποίησης ειδήσεων. Έχω μια λίστα από ανεξάρτητα άρθρα.
 Για το καθένα:
 1. Επίλεξε από 1 έως 3 κατηγορίες από την παρακάτω αυστηρή λίστα (Core Categories):
 {json.dumps(CORE_CATEGORIES, ensure_ascii=False)}
@@ -144,39 +149,41 @@ async def call_gemini_batch_categorize(articles, client):
 Λίστα Άρθρων:
 {articles_str}"""
 
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
-            req_body = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.0,
-                    "responseMimeType": "application/json"
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
+                req_body = {
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {
+                        "temperature": 0.0,
+                        "responseMimeType": "application/json"
+                    }
                 }
-            }
-            resp = await client.post(url, json=req_body, timeout=15.0)
-            
-            if resp.status_code == 200:
-                res_json = resp.json()
-                parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])
-                if parts and parts[0].get("text"):
-                    text = parts[0]["text"].strip()
-                    text = text.replace("```json", "").replace("```", "").strip()
-                    try:
-                        data = json.loads(text)
-                        for k, v in data.items():
-                            idx = int(k)
-                            if 0 <= idx < len(batch_articles):
-                                c_tags = v.get("core_tags", ["Διάφορα"]) if isinstance(v, dict) else ["Διάφορα"]
-                                u_tags = v.get("custom_tags", []) if isinstance(v, dict) else []
-                                results[batch_start + idx] = {"core_tags": c_tags, "custom_tags": u_tags}
-                    except Exception as je:
-                        print(f"Gemini batch json error: {je}")
-        except Exception as e:
-            print(f"Gemini batch class error: {e}")
+                resp = await client.post(url, json=req_body, timeout=15.0)
 
-    for batch_start in range(0, len(articles), batch_size):
-        batch_end = min(batch_start + batch_size, len(articles))
-        await process_batch(batch_start, articles[batch_start:batch_end])
-        
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])
+                    if parts and parts[0].get("text"):
+                        text = parts[0]["text"].strip()
+                        text = text.replace("```json", "").replace("```", "").strip()
+                        try:
+                            data = json.loads(text)
+                            for k, v in data.items():
+                                idx = int(k)
+                                if 0 <= idx < len(batch_articles):
+                                    c_tags = v.get("core_tags", ["Διάφορα"]) if isinstance(v, dict) else ["Διάφορα"]
+                                    u_tags = v.get("custom_tags", []) if isinstance(v, dict) else []
+                                    results[batch_start + idx] = {"core_tags": c_tags, "custom_tags": u_tags}
+                        except Exception as je:
+                            print(f"Gemini batch json error: {je}")
+            except Exception as e:
+                print(f"Gemini batch class error: {e}")
+
+    tasks = [
+        process_batch(batch_start, articles[batch_start:min(batch_start + batch_size, len(articles))])
+        for batch_start in range(0, len(articles), batch_size)
+    ]
+    await asyncio.gather(*tasks)
+
     return results
 
 def cluster_super_group(articles, precomputed_embeddings=None):

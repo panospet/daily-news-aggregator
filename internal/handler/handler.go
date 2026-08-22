@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	htmlpkg "html"
 	"html/template"
 	"log"
 	"net/http"
@@ -32,6 +33,34 @@ type Server struct {
 	FetchFn    func(db *sql.DB) (*models.AIDashboardData, error)
 	RetryFn    func(hours int) (*models.DashboardData, error)
 	Repo       *database.Repository
+}
+
+// aiServiceURL returns the configured Python AI service base URL,
+// falling back to the local default when unset (e.g. in tests).
+func (s *Server) aiServiceURL() string {
+	if u := s.Cfg.AIServiceURL; u != "" {
+		return u
+	}
+	return "http://127.0.0.1:8001"
+}
+
+// findGroup locates a group by category name and stable group_id.
+// Returns the matched group and whether it was found.
+func findGroup(data *models.AIDashboardData, cat, groupID string) (models.AIGroup, bool) {
+	if data == nil || groupID == "" {
+		return models.AIGroup{}, false
+	}
+	for _, cg := range data.Categories {
+		if !strings.EqualFold(cg.Category, cat) {
+			continue
+		}
+		for _, g := range cg.Groups {
+			if g.GroupID == groupID {
+				return g, true
+			}
+		}
+	}
+	return models.AIGroup{}, false
 }
 
 // GetDataWithFallback fetches AI data, falling back to flat data if AI cache is empty or refreshing.
@@ -460,7 +489,7 @@ func (s *Server) semanticSearch(query string, data *models.AIDashboardData) []mo
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Post("http://127.0.0.1:8001/search-embed", "application/json", bytes.NewBuffer(reqBody))
+	resp, err := client.Post(s.aiServiceURL()+"/search-embed", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[search] Failed to call search-embed: %v", err)
 		return nil
@@ -571,12 +600,6 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 
 	cat := r.FormValue("category")
 	groupID := r.FormValue("group_id")
-	groupIdxStr := r.FormValue("group")
-
-	groupIdx, err := strconv.Atoi(groupIdxStr)
-	if err != nil {
-		groupIdx = -1
-	}
 
 	data, err := s.AICache.Get(s.DB, s.FetchFn)
 	if err != nil {
@@ -588,35 +611,14 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 	var targetTopic string
 	found := false
 
-	// Prefer lookup by stable group_id (prevents index-mismatch on cache refresh)
-	for _, cg := range data.Categories {
-		if !strings.EqualFold(cg.Category, cat) {
-			continue
-		}
-		if groupID != "" {
-			for _, g := range cg.Groups {
-				if g.GroupID == groupID {
-					targetGroup = g
-					targetTopic = g.Topic
-					found = true
-					break
-				}
-			}
-		}
-		// Fallback to index lookup ONLY if no group_id was provided (legacy clients)
-		if !found && groupID == "" && groupIdx >= 0 && groupIdx < len(cg.Groups) {
-			targetGroup = cg.Groups[groupIdx]
-			targetTopic = cg.Groups[groupIdx].Topic
-			found = true
-		}
-		if found {
-			break
-		}
+	targetGroup, found = findGroup(data, cat, groupID)
+	if found {
+		targetTopic = targetGroup.Topic
 	}
 
 	if !found {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.WriteHeader(http.StatusNotFound)
+		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`<div class="summary-refresh">⚠️ Τα δεδομένα άλλαξαν. Κάνε <a href="/" hx-get="/" hx-target="body">ανανέωση</a> και δοκίμασε ξανά.</div>`))
 		return
 	}
@@ -646,7 +648,10 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		s.AICache.UpdateTopic(cat, targetGroup.GroupID, fancyTopic)
 	}
 
-	formattedSummary := strings.ReplaceAll(summary.Summary, "\n", "<br>")
+	// Sanitize the AI-generated summary before rendering it as HTML:
+	// escape everything, then re-introduce only OUR paragraph breaks.
+	// (Summary text is derived from untrusted RSS content — never render it raw.)
+	formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(summary.Summary), "\n", "<br>")
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = s.Tpl.Partial.ExecuteTemplate(w, "summary", map[string]interface{}{
@@ -685,24 +690,9 @@ func (s *Server) HandleFeedback(w http.ResponseWriter, r *http.Request) {
 	var targetTopic string
 	found := false
 
-	// Find the exact group being reported
-	for _, cg := range data.Categories {
-		if !strings.EqualFold(cg.Category, cat) {
-			continue
-		}
-		if groupID != "" {
-			for _, g := range cg.Groups {
-				if g.GroupID == groupID {
-					targetGroup = g
-					targetTopic = g.Topic
-					found = true
-					break
-				}
-			}
-		}
-		if found {
-			break
-		}
+	targetGroup, found = findGroup(data, cat, groupID)
+	if found {
+		targetTopic = targetGroup.Topic
 	}
 
 	if !found {
@@ -750,23 +740,9 @@ func (s *Server) HandlePositiveFeedback(w http.ResponseWriter, r *http.Request) 
 	var targetTopic string
 	found := false
 
-	for _, cg := range data.Categories {
-		if !strings.EqualFold(cg.Category, cat) {
-			continue
-		}
-		if groupID != "" {
-			for _, g := range cg.Groups {
-				if g.GroupID == groupID {
-					targetGroup = g
-					targetTopic = g.Topic
-					found = true
-					break
-				}
-			}
-		}
-		if found {
-			break
-		}
+	targetGroup, found = findGroup(data, cat, groupID)
+	if found {
+		targetTopic = targetGroup.Topic
 	}
 
 	if !found {

@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    name: Go vet & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: Vet
+        run: go vet ./cmd/... ./internal/...
+
+      - name: Build
+        run: go build ./cmd/server
+
+      - name: Test
+        run: go test ./internal/... -count=1
+
+  python:
+    name: Python syntax check (AI service)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile-check AI service sources
+        run: python -m compileall ai/*.py

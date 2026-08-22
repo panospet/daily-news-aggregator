@@ -16,6 +16,8 @@ type Config struct {
 	GeminiAPIKey string
 	AuthUsername string
 	AuthPassword string
+	AIServiceURL string
+	RedisAddr    string
 }
 
 // Load reads configuration from environment variables with sensible defaults.
@@ -30,6 +32,8 @@ func Load() Config {
 		GeminiAPIKey: EnvStr("GEMINI_API_KEY", ""),
 		AuthUsername: EnvStr("AUTH_USERNAME", ""),
 		AuthPassword: EnvStr("AUTH_PASSWORD", ""),
+		AIServiceURL: EnvStr("AI_SERVICE_URL", "http://127.0.0.1:8001"),
+		RedisAddr:    EnvStr("REDIS_ADDR", "127.0.0.1:6379"),
 	}
 }
 
