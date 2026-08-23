@@ -1,7 +1,7 @@
 FROM python:3.12-alpine
 
 WORKDIR /app
-COPY kalodio.py .
+COPY --chmod=0644 kalodio.py .
 
 # Run as unprivileged user
 RUN adduser -D -u 10001 kalodio
