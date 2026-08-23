@@ -634,6 +634,13 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 	summary, err := s.Summarizer.Summarize(targetTopic, targetGroup.Articles)
 	if err != nil {
 		log.Printf("Summarize error: %v", err)
+		// Distinguish grounding rejections so the UI can explain the retry.
+		if strings.Contains(err.Error(), "grounding check") {
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`<div class="summary-refresh">⚠️ Η σύνοψη απορρίφθηκε από τον έλεγχο εγκυρότητας (τα άρθρα δεν επαρκούν). Δοκιμάστε ξανά σε λίγο.</div>`))
+			return
+		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-fallback", targetGroup)
 		return
