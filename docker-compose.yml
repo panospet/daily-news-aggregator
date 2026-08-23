@@ -1,11 +1,40 @@
 # Miniflux Dashboard — Docker Compose
 
 services:
+  # kalodio: official public frontend (newspaper.panos.pet).
+  # Serves the newspaper UI on :8280; the Cloudflare tunnel routes
+  # newspaper.panos.pet -> localhost:8080 -> see cloudflared-newspaper note:
+  # ingress points at :8080, so a port-forward from 8080->8280 is done by
+  # socat below. The legacy HTMX dashboard stays on :8081 behind basic auth.
+  kalodio:
+    build: ./kalodio
+    container_name: kalodio
+    network_mode: "host"
+    env_file: .env
+    environment:
+      - KALODIO_UPSTREAM=http://127.0.0.1:8081
+      - KALODIO_REDIS_HOST=127.0.0.1
+      - KALODIO_REDIS_PORT=6379
+      - KALODIO_PORT=8280
+      - KALODIO_BIND=0.0.0.0
+    restart: unless-stopped
+
+  # Port-forward tunnel entrypoint (8080) -> kalodio (8280). Keeps the
+  # Cloudflare tunnel config untouched while Kalodio serves the public site.
+  tunnel-port-forward:
+    image: alpine/socat
+    container_name: newspaper-port-forward
+    network_mode: "host"
+    command: ["TCP-LISTEN:8080,fork,reuseaddr", "TCP:127.0.0.1:8280"]
+    restart: unless-stopped
+
   dashboard:
     build: .
     container_name: miniflux-dashboard
     network_mode: "host"
     env_file: .env
+    environment:
+      - PORT=8081
     restart: unless-stopped
     depends_on:
       - ai-service
