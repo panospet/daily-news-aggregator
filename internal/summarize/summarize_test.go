@@ -145,8 +145,8 @@ func TestSummarize_RejectsMissingCitations(t *testing.T) {
 	svc := &Service{Gemini: mock}
 
 	if _, err := svc.Summarize("Topic", []models.Article{sourceArticle("A")}); err == nil ||
-		!strings.Contains(err.Error(), "no [n] citations") {
-		t.Errorf("expected citation rejection, got %v", err)
+		!strings.Contains(err.Error(), "grounding check") {
+		t.Errorf("expected grounding rejection for missing citations, got %v", err)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"time"
@@ -157,15 +158,35 @@ Return JSON: {"summary": "Περίληψη... [1]\n\n Επόμενη παράγ�
 		return models.AISummaryResult{}, fmt.Errorf("parse summary: %w (raw: %s)", err, jsonStr)
 	}
 
-	// 4. Verification pass — reject ungrounded output.
-	if reason := verifyGrounded(parsed.Summary, parsedData); reason != "" {
-		return models.AISummaryResult{}, fmt.Errorf("summary rejected by grounding check: %s", reason)
+	// 4. Verification pass with one retry — generation is stochastic, so a
+	// summary that fails grounding gets a second chance before we give up.
+	for attempt := 1; attempt <= 2; attempt++ {
+		if attempt > 1 {
+			sb.WriteString(fmt.Sprintf("\nΣΗΜΑΝΣΗ: Η προηγούμενη προσπάθεια απορρίφθηκε επειδή περιείχε στοιχεία που δεν υπάρχουν στα άρθρα. Χρησιμοποίησε ΜΟΝΟ όσα αναφέρονται ρητά στα άρθρα και βεβαίωσου ότι κάθε πρόταση έχει παραπομπή [n].\n"))
+			jsonStr, err = s.Gemini.Call(sb.String(), schema)
+			if err != nil {
+				return models.AISummaryResult{}, fmt.Errorf("summarize call failed: %w", err)
+			}
+			cleanStr = jsonStr
+			startIdx := strings.Index(jsonStr, "{")
+			endIdx := strings.LastIndex(jsonStr, "}")
+			if startIdx != -1 && endIdx != -1 && endIdx > startIdx {
+				cleanStr = jsonStr[startIdx : endIdx+1]
+			}
+			if err := json.NewDecoder(strings.NewReader(cleanStr)).Decode(&parsed); err != nil {
+				return models.AISummaryResult{}, fmt.Errorf("parse summary (retry): %w", err)
+			}
+		}
+		reason := verifyGrounded(parsed.Summary, parsedData)
+		if reason == "" {
+			return models.AISummaryResult{
+				Summary: parsed.Summary,
+				Sources: []string{parsed.Topic},
+			}, nil
+		}
+		log.Printf("[summarize] grounding check rejected attempt %d: %s", attempt, reason)
 	}
-
-	return models.AISummaryResult{
-		Summary: parsed.Summary,
-		Sources: []string{parsed.Topic},
-	}, nil
+	return models.AISummaryResult{}, fmt.Errorf("summary rejected by grounding check after retry")
 }
 
 // minSourceWords is the minimum content length for an article to count as a
