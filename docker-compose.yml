@@ -17,6 +17,8 @@ services:
       - KALODIO_REDIS_PORT=6379
       - KALODIO_PORT=8280
       - KALODIO_BIND=0.0.0.0
+      - KALODIO_AUTH_USER=${AUTH_USERNAME}
+      - KALODIO_AUTH_PASS=${AUTH_PASSWORD}
     restart: unless-stopped
 
   # Port-forward tunnel entrypoint (8080) -> kalodio (8280). Keeps the

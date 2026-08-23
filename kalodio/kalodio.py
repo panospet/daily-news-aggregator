@@ -586,10 +586,14 @@ def news_api():
 
 
 def find_creds():
-    """Best-effort: pull AUTH_USERNAME/AUTH_PASSWORD from the repo .env so the
-    summary proxy works out of the box. Never logged, only sent upstream."""
+    """Best-effort: pull AUTH_USERNAME/AUTH_PASSWORD from env or repo .env so
+    the summary proxy works out of the box. Never logged, only sent upstream."""
     global UPSTREAM_USER, UPSTREAM_PASS
-    for path in ("/home/panos/daily-news-aggregator/.env",):
+    if UPSTREAM_USER and UPSTREAM_PASS:
+        return
+    paths = ("/home/panos/daily-news-aggregator/.env",
+             os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
+    for path in paths:
         try:
             with open(path) as f:
                 for line in f:
