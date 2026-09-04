@@ -53,7 +53,7 @@ func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICatego
 		return s.fallbackFlat(allArticles), nil
 	}
 
-	client := &http.Client{Timeout: 1200 * time.Second}
+	client := &http.Client{Timeout: 1800 * time.Second}
 	resp, err := client.Post(s.AIServiceURL+"/cluster", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[clustering] AI service call failed: %v", err)
@@ -100,7 +100,7 @@ func (s *Service) computeAndStoreEmbeddings(articles []models.Article) {
 		return
 	}
 
-	client := &http.Client{Timeout: 1200 * time.Second}
+	client := &http.Client{Timeout: 1800 * time.Second}
 	resp, err := client.Post(s.AIServiceURL+"/embed", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[embeddings] Failed to call embed endpoint: %v", err)
