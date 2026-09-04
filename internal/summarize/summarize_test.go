@@ -50,7 +50,7 @@ func TestSummarize_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Summary != "Περίληψη ειδήσεων [1]" {
+	if result.Summary != "Περίληψη ειδήσεων" {
 		t.Errorf("expected Greek summary, got %q", result.Summary)
 	}
 	if len(result.Sources) != 1 || result.Sources[0] != "Θέμα Τεστ" {
@@ -80,7 +80,7 @@ func TestSummarize_WordLimit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Summary != "OK [1]" {
+	if result.Summary != "OK" {
 		t.Errorf("expected OK, got %q", result.Summary)
 	}
 }
@@ -128,7 +128,7 @@ func (m *countingMock) CallGrouping(prompt string) (string, error) { return m.re
 
 func TestSummarize_RejectsFabricatedNumbers(t *testing.T) {
 	mock := &mockGemini{
-		response: `{"summary": "Ο αγώνας τελείωσε 4-0 [1]. Νίκη με γκολ στο 83' [1].", "topic": "T"}`,
+		response: `{"summary": "Η εταιρεία ανέφερε κέρδη 500 εκατομμυρίων [1].", "topic": "T"}`,
 	}
 	svc := &Service{Gemini: mock}
 

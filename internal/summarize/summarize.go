@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -51,6 +52,15 @@ func (s *Service) SummarizeContext(ctx context.Context, topic string, articles [
 	}
 	if len(usable) == 0 {
 		return models.AISummaryResult{}, fmt.Errorf("no article has enough content to summarize (all stubs)")
+	}
+
+	// Cap at most recent 20 sources to reduce hallucination pressure on large groups.
+	const maxSources = 20
+	if len(usable) > maxSources {
+		sort.Slice(usable, func(i, j int) bool {
+			return usable[i].Published.After(usable[j].Published)
+		})
+		usable = usable[:maxSources]
 	}
 
 	var sb strings.Builder
@@ -179,8 +189,9 @@ Return JSON: {"summary": "Περίληψη... [1]\n\n Επόμενη παράγ�
 		}
 		reason := verifyGrounded(parsed.Summary, parsedData)
 		if reason == "" {
+			cleanSummary := stripCitationRe.ReplaceAllString(parsed.Summary, "")
 			return models.AISummaryResult{
-				Summary: parsed.Summary,
+				Summary: cleanSummary,
 				Sources: []string{parsed.Topic},
 			}, nil
 		}
@@ -204,6 +215,7 @@ type articleData struct {
 
 // citationRe matches [1] / [2][5] / [1,3] style citations.
 var citationRe = regexp.MustCompile(`\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)\]`)
+var stripCitationRe = regexp.MustCompile(`\s*\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)\]`)
 var numRe = regexp.MustCompile(`\d+`)
 
 // verifyGrounded returns "" when the summary passes, or a rejection reason.
@@ -230,11 +242,12 @@ func verifyGrounded(summary string, sources []articleData) string {
 		}
 	}
 
-	// Numbers that look like facts (2+ digits) must exist in the sources.
-	// Single digits are too noisy (list indices, "11άδα" etc).
+	// Numbers that look like real facts (3+ digits: 100+) must exist in the sources.
+	// Smaller numbers (1-99) are too noisy — list indices, ages, vague counts
+	// that models routinely synthesize as filler.
 	summaryNums := map[string]bool{}
 	for _, m := range numRe.FindAllString(summary, -1) {
-		if len(m) >= 2 {
+		if len(m) >= 3 {
 			summaryNums[m] = true
 		}
 	}
