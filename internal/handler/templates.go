@@ -61,6 +61,8 @@ func LoadTemplates(embeddedFS fs.FS) (*TemplateSet, error) {
 				return "💻"
 			case strings.Contains(cat, "Lifestyle"):
 				return "🛋️"
+			case strings.Contains(cat, "Γνώμης"):
+				return "✍️"
 			case strings.Contains(cat, "Διάφορα"):
 				return "🌀"
 			default:
