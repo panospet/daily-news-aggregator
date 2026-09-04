@@ -313,9 +313,30 @@ footer{
   header{grid-template-columns:1fr; justify-items:center; gap:.2rem}
   .mh-side{display:none}
 }
+/* ---- read state ---- */
+article.story--read{opacity:.5}
+article.story--read h3.headline{text-decoration:line-through}
+article.story--read .btn-sum{display:none}
+/* ---- source metadata ---- */
+.src-meta{display:block; font-size:.72rem; color:var(--muted); margin-top:.12rem}
+/* ---- toast notifications ---- */
+#toast-container{position:fixed; top:1rem; right:1rem; z-index:200; display:flex; flex-direction:column; gap:.5rem}
+.toast{background:var(--card); border:1px solid var(--rule); border-radius:4px; padding:.65rem 1rem; font-size:.82rem; transform:translateX(120%); transition:transform .3s; max-width:320px}
+.toast.show{transform:translateX(0)}
+.toast.error{border-color:var(--accent); color:var(--accent)}
+.toast.info{border-color:var(--muted); color:var(--muted)}
+/* ---- fallback / notice banner ---- */
+.notice-banner{background:var(--chip); border:1px solid var(--rule); border-radius:4px; padding:.7rem 1rem; margin-bottom:1rem; font-size:.82rem; color:var(--muted)}
+/* ---- rail section headings ---- */
+.rail-section{font-size:.68rem; text-transform:uppercase; letter-spacing:.14em; color:var(--muted); margin-top:1rem; margin-bottom:.4rem; padding-top:.6rem; border-top:1px solid var(--rule)}
+/* ---- unread toggle ---- */
+.unread-toggle{font:inherit; font-size:.72rem; text-transform:uppercase; letter-spacing:.08em; background:none; border:1px solid var(--rule); color:var(--muted); padding:.25rem .6rem; cursor:pointer; border-radius:2px}
+.unread-toggle.active{background:var(--accent); color:var(--paper); border-color:var(--accent)}
 </style>
 </head>
 <body>
+<div id="toast-container"></div>
+<div id="fallback-banner" class="notice-banner" hidden></div>
 <header>
   <div class="mh-side" id="edition">—</div>
   <h1 class="masthead">ΤΟ ΚΑΛΩΔΙΟ<span class="amp">.</span></h1>
@@ -325,6 +346,7 @@ footer{
   <div class="controls">
     <input id="q" type="search" placeholder="Αναζήτηση τίτλων… (ή #ετικέτα)" autocomplete="off">
     <button class="ghost" onclick="setCat('all')">Όλα</button>
+    <button class="unread-toggle" id="unreadBtn" onclick="toggleReadFilter()">Νέα μόνο</button>
   </div>
   <div class="controls">
     <span id="clock"></span>
@@ -358,7 +380,7 @@ async function load(){
   document.getElementById('edition').textContent='Εκδοση '+DATA.generated+' — '+DATA.total+' αρθρα';
 }
 function buildRail(){
-  rail.querySelectorAll('button').forEach(b=>b.remove());
+  rail.querySelectorAll('button,.rail-section').forEach(b=>b.remove());
   const mk=(id,label,n)=>{
     const b=document.createElement('button');
     b.innerHTML=esc(label)+' <span class="n">'+n+'</span>';
@@ -366,8 +388,21 @@ function buildRail(){
     if((CAT===id)||(CAT==='all'&&id==='all')) b.classList.add('active');
     rail.appendChild(b);
   };
-  mk('all','Πρώτη Σελίδα',DATA.groups.length);
+  const unreadCount=SHOW_READ?DATA.groups.length:DATA.groups.filter(g=>!isRead(g.gid)).length;
+  mk('all','Πρώτη Σελίδα',unreadCount);
   for(const c of DATA.cats) mk(c.name,c.name,c.count);
+  // F4: top tags sidebar section
+  const topTags=(DATA.top_tags||[]).slice(0,15);
+  if(topTags.length){
+    const h=document.createElement('div'); h.className='rail-section'; h.textContent='Ετικέτες';
+    rail.appendChild(h);
+    for(const t of topTags){
+      const b=document.createElement('button');
+      b.innerHTML=esc(t.tag)+' <span class="n">'+t.count+'</span>';
+      b.onclick=()=>setTag(t.tag);
+      rail.appendChild(b);
+    }
+  }
 }
 function setCat(c){CAT=c;Q='';document.getElementById('q').value='';buildRail();apply()}
 function setTag(t){CAT='all';Q='#'+t;document.getElementById('q').value=Q;buildRail();apply()}
@@ -385,6 +420,8 @@ function apply(){
       g.feeds.some(f=>f.toLowerCase().includes(q))||
       g.articles.some(a=>a.title.toLowerCase().includes(q)));
   }
+  // F1: filter out read stories when "Νέα μόνο" is active
+  if(!SHOW_READ) items=items.filter(g=>!isRead(g.gid));
   VIEW=items.slice().sort((a,b)=>b.count-a.count||b.arts-a.arts);
   SHOWN=0;
   document.getElementById('secTitle').textContent=
@@ -429,10 +466,10 @@ function armObserver(){
   io.observe(sentinel);
 }
 function card(g){
-  const el=document.createElement('article'); el.className='story';
+  const el=document.createElement('article'); el.className='story'+(isRead(g.gid)?' story--read':'');
   const srcs=g.articles.map(a=>
-    '<li><a href="'+esc(a.url)+'" target="_blank" rel="noopener">'+esc(a.feed)+'</a>'+
-    '<span class="when">'+esc(a.time_ago)+'</span></li>').join('');
+    '<li><a href="'+esc(a.url)+'" target="_blank" rel="noopener">'+esc(a.title)+'</a>'+
+    '<span class="src-meta">'+esc(a.feed)+' · '+esc(a.time_ago)+'</span></li>').join('');
   el.innerHTML=
     '<div class="kicker">'+esc(g.cat)+'</div>'+
     '<h3 class="headline">'+esc(g.topic)+'</h3>'+
@@ -469,6 +506,7 @@ function card(g){
         }
         article.classList.add('expanded');
         btn.textContent='× Κλείσιμο';
+        markRead(g.gid); article.classList.add('story--read');
         article.scrollIntoView({behavior:'smooth',block:'nearest'});
       }
     };
@@ -498,10 +536,84 @@ function toggleTheme(){
 try{const t=localStorage.getItem('kalodio-theme');if(t)document.documentElement.dataset.theme=t;
   if(document.documentElement.dataset.theme==='night')document.getElementById('themeBtn').textContent='☀ Μέρα';
 }catch(e){}
-document.getElementById('q').addEventListener('input',e=>{Q=e.target.value.trim();apply()});
+document.getElementById('q').addEventListener('input',e=>{
+  Q=e.target.value.trim();apply();
+  // F6: debounced semantic search for text queries
+  clearTimeout(window._searchTimer);
+  if(Q&&!Q.startsWith('#')){window._searchTimer=setTimeout(()=>semanticSearch(Q),400)}
+});
+async function semanticSearch(query){
+  try{
+    const r=await fetch('/api/search?q='+encodeURIComponent(query));
+    if(!r.ok)return;const j=await r.json();
+    if(j.groups&&j.groups.length>0){
+      VIEW=j.groups;SHOWN=0;
+      document.getElementById('secTitle').textContent='Αναζήτηση: '+query;
+      document.getElementById('secCount').textContent=VIEW.length+' θέματα';
+      empty.hidden=VIEW.length>0;grid.innerHTML='';loadMore();
+    }
+  }catch(e){/* silent — substring results already shown */}
+}
 setInterval(()=>{document.getElementById('clock').textContent=
   new Date().toLocaleTimeString('el-GR',{hour:'2-digit',minute:'2-digit'})},1000);
+
+/* ---- read state management (F1) ---- */
+const READ_KEY='kalodio-read';
+let READ_SET=new Set(JSON.parse(localStorage.getItem(READ_KEY)||'[]'));
+let SHOW_READ=true;
+function saveRead(){try{localStorage.setItem(READ_KEY,JSON.stringify([...READ_SET]))}catch(e){}}
+function markRead(gid){if(gid){READ_SET.add(gid);saveRead()}}
+function isRead(gid){return gid&&READ_SET.has(gid)}
+function toggleReadFilter(){
+  SHOW_READ=!SHOW_READ;
+  const btn=document.getElementById('unreadBtn');
+  if(btn){btn.classList.toggle('active',!SHOW_READ);btn.textContent=SHOW_READ?'Νέα μόνο':'Όλα'}
+  buildRail();apply();
+}
+
+/* ---- toast notifications (F7) ---- */
+function showToast(msg,type){
+  const c=document.getElementById('toast-container');if(!c)return;
+  const t=document.createElement('div');t.className='toast '+(type||'info');t.textContent=msg;
+  c.appendChild(t);requestAnimationFrame(()=>t.classList.add('show'));
+  setTimeout(()=>{t.classList.remove('show');setTimeout(()=>t.remove(),300)},4000);
+}
+
+/* ---- keyboard shortcuts (F5) ---- */
+document.addEventListener('keydown',e=>{
+  if(e.key==='/'&&!['INPUT','TEXTAREA'].includes(document.activeElement.tagName)){
+    e.preventDefault();document.getElementById('q').focus();
+  }
+  if(e.key==='Escape'){
+    document.querySelectorAll('article.story.expanded').forEach(a=>{
+      a.classList.remove('expanded');
+      const btn=a.querySelector('.btn-sum');if(btn)btn.textContent='✦ Σύνοψη';
+      const box=a.querySelector('.summary-box');if(box)box.hidden=true;
+    });
+    document.getElementById('q').blur();
+  }
+});
+
+/* ---- auto-refresh (F2) — every 10 min ---- */
+setInterval(async()=>{
+  if(document.querySelector('article.story.expanded'))return;
+  try{const r=await fetch('/api/news');if(!r.ok)return;DATA=await r.json();buildRail();apply();
+    checkFallback();
+  }catch(e){showToast('Σφάλμα φόρτωσης — προσπάθεια ξανά.','error')}
+},10*60*1000);
+
+/* ---- fallback banner (F8) — heuristic: generated > 3h ago ---- */
+function checkFallback(){
+  const b=document.getElementById('fallback-banner');if(!b||!DATA)return;
+  try{
+    const gen=new Date(DATA.generated);const ageH=(Date.now()-gen.getTime())/3.6e6;
+    if(ageH>3){b.textContent='⏳ Τα δεδομένα είναι παλιότερα από 3 ώρες — ενδέχεται να ανανεώνονται.';b.hidden=false}
+    else{b.hidden=true}
+  }catch(e){b.hidden=true}
+}
+
 load();
+checkFallback();
 </script>
 </body>
 </html>"""
@@ -524,10 +636,57 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, PAGE.encode())
         elif parsed.path == "/api/news":
             self._send(200, json.dumps(news_api()).encode(), "application/json")
+        elif parsed.path == "/api/search":
+            self._handle_search(parsed)
         elif parsed.path == "/healthz":
             self._send(200, b"ok", "text/plain")
         else:
             self._send(404, b"not found", "text/plain")
+
+    def _handle_search(self, parsed):
+        """Proxy semantic search to the Go backend, return JSON groups."""
+        q = parse_qs(parsed.query).get("q", [""])[0]
+        if not q:
+            self._send(200, json.dumps({"groups": []}).encode(), "application/json")
+            return
+        try:
+            req = urllib.request.Request(
+                UPSTREAM + "/search?q=" + quote(q),
+                headers={"HX-Request": "true", "Accept": "text/html"},
+            )
+            if UPSTREAM_USER:
+                import base64
+                token = base64.b64encode(
+                    f"{UPSTREAM_USER}:{UPSTREAM_PASS}".encode()
+                ).decode()
+                req.add_header("Authorization", "Basic " + token)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                html_resp = resp.read().decode("utf-8", errors="replace")
+            # Extract group IDs from data-group-id attributes (preserve order, dedupe)
+            gids = list(dict.fromkeys(re.findall(r'data-group-id="([^"]*)"', html_resp)))
+            # Look up groups from ai_cache
+            data = load_data() or {}
+            gid_set = set(gids)
+            result_groups, seen = [], set()
+            for cat_name, g in all_groups(data):
+                gid = g.get("group_id") or ""
+                if not gid or gid in seen or gid not in gid_set:
+                    continue
+                seen.add(gid)
+                arts = [
+                    {"title": a.get("title", ""), "url": a.get("url", "#"),
+                     "feed": a.get("feed", ""), "time_ago": a.get("time_ago", "")}
+                    for a in g.get("articles", [])
+                ]
+                result_groups.append({
+                    "gid": gid, "cat": cat_name, "cats": [cat_name],
+                    "topic": g.get("topic", ""), "count": g.get("count", len(arts)),
+                    "tags": g.get("tags", [])[:6], "feeds": group_feeds(g),
+                    "arts": len(arts), "articles": arts,
+                })
+            self._send(200, json.dumps({"groups": result_groups}).encode(), "application/json")
+        except Exception as e:  # noqa: BLE001
+            self._send(200, json.dumps({"groups": [], "error": str(e)}).encode(), "application/json")
 
     def do_POST(self):
         if urlparse(self.path).path != "/api/summary":
@@ -582,7 +741,7 @@ def news_api():
             "articles": arts,
         })
     return {"total": data.get("total", len(groups)), "generated": data.get("generated", "—"),
-            "cats": cats, "groups": groups}
+            "cats": cats, "groups": groups, "top_tags": data.get("top_tags", [])}
 
 
 def find_creds():
