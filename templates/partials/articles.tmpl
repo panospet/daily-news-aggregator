@@ -1,7 +1,29 @@
 {{define "articles"}}
 <div id="stream" hx-boost="true" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true">
 {{if .IsFallback}}<div class="notice-banner">⏳ AI grouping is running in the background. Showing raw articles temporarily.</div>{{end}}
-{{if or (eq .View "top") (eq .View "tags") (eq .View "search")}}
+{{if eq .View "feed"}}
+<div class="topgrid-head">
+  <div class="topgrid-title">{{.Query}}</div>
+  <div class="topgrid-sub">{{.Total}} {{if eq .Total 1}}article{{else}}articles{{end}}</div>
+</div>
+<div class="card card--open" style="pointer-events: none;">
+  <div class="card__body" style="display: block; pointer-events: auto;">
+    <ul class="src-list">
+      {{range $idx, $tg := .TopGroups}}
+        {{range $tg.Group.Articles}}
+          <li style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
+            <div style="width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 12px;">
+              <a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a>
+              <span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span>
+            </div>
+            <button class="btn-sum" style="margin: 6px 0 0 0; padding: 4px 8px; font-size: 10px;" hx-post="/summarize-article" hx-vals='{"article_id":"{{.ID}}"}' hx-target="closest li" hx-swap="outerHTML" hx-push-url="false"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
+          </li>
+        {{end}}
+      {{end}}
+    </ul>
+  </div>
+</div>
+{{else if or (eq .View "top") (eq .View "tags") (eq .View "search")}}
 <div class="topgrid-head">
   <div class="topgrid-title">{{if eq .View "top"}}Top Stories{{else}}Results{{end}}</div>
   <div class="topgrid-sub">{{.Total}} {{if eq .Total 1}}story group{{else}}story groups{{end}} · {{if eq .View "top"}}most related articles first{{else}}matching groups{{end}}</div>
@@ -59,7 +81,8 @@
 {{define "card-body"}}
     <a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a>
     <div class="card__tags">{{range .Group.Tags}}<a class="tag" href="/search?q=%23{{. | urlquery}}">#{{.}}</a>{{end}}{{range uniqueFeeds .Group.Articles}}<span class="tag tag--src">{{.}}</span>{{end}}</div>
-    <button class="btn-sum" hx-post="/summarize" hx-vals='{"category":"{{.Category}}","group_id":"{{.Group.GroupID}}"}' hx-target="closest .card" hx-swap="outerHTML" hx-push-url="false"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
+    <button class="btn-sum" type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.Group.GroupID}}"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
+    <div class="summary summary--stream" hidden><span class="summary__text"></span><em class="summary__note" aria-hidden="true"><span>.</span><span>.</span><span>.</span></em></div>
     <div class="src-label">Sources</div>
     <ul class="src-list">{{range .Group.Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span></li>{{end}}</ul>
 {{end}}
@@ -79,12 +102,24 @@
     <span class="card__title">{{.Topic}}</span>
     <span class="card__cnt">{{len .Articles}}</span>
     <button class="btn-unread" style="display:none" title="Mark unread">📬 Unread</button>
+    <button type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.GroupID}}" class="btn-retry-sum" title="Retry summary">🔄</button>
     <button hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" class="btn-pos-feedback" title="Good summary">👍</button>
   </div>
   <div class="card__body" data-loaded="1">
     <a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a>
     <div class="card__tags">{{range .Tags}}<a class="tag" href="/search?q=%23{{. | urlquery}}">#{{.}}</a>{{end}}</div>
-    <div class="summary">{{.Summary}}</div>
+    <div class="summary">{{if .IsFallback}}<div style="font-size: 11px; color: #f5a623; margin-bottom: 5px;">⚡ Summarized using Gemini Fallback</div>{{end}}{{.Summary}}</div>
+    {{if gt (len .Articles) 3}}
+    <form hx-post="/summarize/more" hx-target="this" hx-swap="outerHTML" hx-push-url="false" style="margin-bottom: 15px; margin-top: 5px;">
+      <input type="hidden" name="category" value="{{.Category}}">
+      <input type="hidden" name="group_id" value="{{.GroupID}}">
+      <input type="hidden" name="existing_summary" value="{{.Summary}}">
+      <button type="submit" class="btn-sum" style="width: auto; padding: 4px 12px; margin: 0;" onclick="this.classList.add('htmx-request'); this.querySelector('.btn-sum__text').style.display='none';">
+        <span class="btn-sum__text" style="font-size: 12px;">Πείτε μου περισσότερα...</span>
+        <span class="btn-sum__spinner" style="border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; width: 12px; height: 12px; display: none; animation: spin 0.6s linear infinite;"></span>
+      </button>
+    </form>
+    {{end}}
     <div class="src-label">Sources</div>
     <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span><button class="fb" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Not relevant">✕</button></li>{{end}}</ul>
   </div>
@@ -98,6 +133,7 @@
     <span class="card__title">{{.Topic}}</span>
     <span class="card__cnt">{{len .Articles}}</span>
     <button class="btn-unread" style="display:none" title="Mark unread">📬 Unread</button>
+    <button type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.GroupID}}" class="btn-retry-sum" title="Retry summary">🔄</button>
     <button hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" class="btn-pos-feedback" title="Good summary">👍</button>
   </div>
   <div class="card__body" data-loaded="1">
@@ -107,4 +143,24 @@
     <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span><button class="fb" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Not relevant">✕</button></li>{{end}}</ul>
   </div>
 </div>
+{{end}}
+
+{{define "summary-article"}}
+<li style="display: flex; flex-direction: column; gap: 8px; background: var(--card-open); padding: 12px; border-radius: 8px; border: 1px solid var(--acc);">
+  <div style="width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 12px;">
+    <a href="{{.Article.URL}}" target="_blank" rel="noopener" style="font-weight: 600;"><span>{{.Article.Title}}</span><span>→</span></a>
+    <span class="src-meta">{{.Article.Feed}} · {{.Article.TimeAgo}}</span>
+  </div>
+  <div class="summary" style="margin-bottom: 0;">{{.Summary}}</div>
+</li>
+{{end}}
+
+{{define "summary-article-fallback"}}
+<li style="display: flex; flex-direction: column; gap: 8px; background: var(--card-open); padding: 12px; border-radius: 8px; border: 1px solid var(--line);">
+  <div style="width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 12px;">
+    <a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a>
+    <span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span>
+  </div>
+  <div class="summary" style="margin-bottom: 0;"><em>Summary unavailable.</em></div>
+</li>
 {{end}}

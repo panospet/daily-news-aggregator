@@ -9,7 +9,7 @@
     </span>
     <span class="stat-chip">
         <span class="stat-chip-icon">🕐</span>
-        {{.Generated}}
+        {{.Generated}}{{if .IsLLMFallback}}<span style="color: #f5a623; margin-left: 10px; font-size: 11px;">⚡ Gemini Fallback</span>{{end}}
     </span>
 </div>
 {{end}}

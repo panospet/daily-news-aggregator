@@ -5,11 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"strings"
 
-	"github.com/google/genai-go"
-	"github.com/joho/godotenv"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -27,9 +23,6 @@ type AIDashboardData struct {
 }
 
 func main() {
-	godotenv.Load(".env")
-	apiKey := os.Getenv("GEMINI_API_KEY")
-
 	rdb := redis.NewClient(&redis.Options{
 		Addr: "127.0.0.1:6379",
 	})
@@ -46,17 +39,9 @@ func main() {
 		log.Fatalf("Error unmarshaling JSON: %v", err)
 	}
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{APIKey: genai.String(apiKey)})
-	if err != nil {
-		log.Fatalf("Error creating Gemini client: %v", err)
-	}
-
-	model := client.Models.Get("gemini-2.5-flash-lite")
-
 	prompt := "Does this headline announce a newly released song or album? Answer strictly YES or NO.\nHeadline: "
 
-	totalInputTokens := 0
-	totalOutputTokens := 0
+	totalInputChars := 0
 	musicArticles := 0
 
 	fmt.Println("Estimating cost for music articles...")
@@ -67,31 +52,15 @@ func main() {
 				for _, article := range group.Articles {
 					musicArticles++
 					fullPrompt := prompt + article.Title
-
-					// Instead of running the inference, we just count the tokens to save API calls
-					// But we will run 1 to verify the structure and get average output tokens
-					if musicArticles == 1 {
-						resp, err := model.GenerateContent(ctx, genai.Text(fullPrompt))
-						if err == nil && resp != nil && resp.UsageMetadata != nil {
-							totalOutputTokens += int(resp.UsageMetadata.CandidatesTokenCount) * 51 // Assumed constant per article
-						}
-					}
-
-					resp, err := client.Models.CountTokens(ctx, "gemini-2.5-flash-lite", genai.Text(fullPrompt))
-					if err != nil {
-						log.Printf("Warning: failed to count tokens: %v", err)
-						totalInputTokens += len(strings.Fields(fullPrompt)) * 2 // Fallback estimate
-					} else {
-						totalInputTokens += int(resp.TotalTokens)
-					}
+					totalInputChars += len(fullPrompt)
 				}
 			}
 		}
 	}
+	
+	totalInputTokens := totalInputChars / 4
+	totalOutputTokens := musicArticles * 2
 
-	// Gemini 2.5 Flash-Lite pricing (per 1M tokens):
-	// Input: $0.075
-	// Output: $0.30
 	inputCost := float64(totalInputTokens) / 1000000.0 * 0.075
 	outputCost := float64(totalOutputTokens) / 1000000.0 * 0.30
 	totalCost := inputCost + outputCost
@@ -103,7 +72,4 @@ func main() {
 	fmt.Printf("Input Cost:  $%.6f\n", inputCost)
 	fmt.Printf("Output Cost: $%.6f\n", outputCost)
 	fmt.Printf("Total Cost:  $%.6f\n", totalCost)
-
-	fmt.Printf("\nEstimated Monthly Cost (2 batches/day x 30 days = 60 batches):\n")
-	fmt.Printf("Monthly Cost: $%.6f\n", totalCost*60)
 }

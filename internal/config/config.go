@@ -13,7 +13,8 @@ type Config struct {
 	DBUser       string
 	DBPass       string
 	HTTPPort     int
-	GeminiAPIKey string
+	CommandCodeAPIKey string
+	FallbackAPIKey string
 	AuthUsername string
 	AuthPassword string
 	AIServiceURL string
@@ -29,7 +30,8 @@ func Load() Config {
 		DBUser:       EnvStr("MF_DB_USER", "external_reader"),
 		DBPass:       EnvStr("MF_DB_PASSWORD", ""),
 		HTTPPort:     EnvInt("PORT", 8080),
-		GeminiAPIKey: EnvStr("GEMINI_API_KEY", ""),
+		CommandCodeAPIKey: EnvStr("COMMAND_CODE_API_KEY", ""),
+		FallbackAPIKey:      EnvStr("GEMINI_API_KEY", ""),
 		AuthUsername: EnvStr("AUTH_USERNAME", ""),
 		AuthPassword: EnvStr("AUTH_PASSWORD", ""),
 		AIServiceURL: EnvStr("AI_SERVICE_URL", "http://127.0.0.1:8001"),

@@ -58,13 +58,21 @@ type TagCount struct {
 	Count int    `json:"count"`
 }
 
+// FeedCount represents a feed and its frequency.
+type FeedCount struct {
+	Feed  string `json:"feed"`
+	Count int    `json:"count"`
+}
+
 // AIDashboardData is the AI-grouped view of all articles.
 type AIDashboardData struct {
 	Categories []AICategoryGroup `json:"categories"`
 	Total      int               `json:"total"`
 	Generated  string            `json:"generated"`
 	IsFallback bool              `json:"is_fallback,omitempty"`
+	IsLLMFallback bool              `json:"is_llm_fallback,omitempty"`
 	TopTags    []TagCount        `json:"top_tags,omitempty"`
+	TopFeeds   []FeedCount       `json:"top_feeds,omitempty"`
 	TopGroups  []TopGroup        `json:"-"`
 	View       string            `json:"-"`
 	Query      string            `json:"-"`
@@ -72,6 +80,8 @@ type AIDashboardData struct {
 
 // AISummaryResult contains the AI-generated summary for a topic group.
 type AISummaryResult struct {
-	Summary string   `json:"summary"`
-	Sources []string `json:"sources"`
+	Summary    string   `json:"summary"`
+	Sources    []string `json:"sources"`
+	IsFallback bool     `json:"is_fallback,omitempty"`
+	IsLLMFallback bool              `json:"is_llm_fallback,omitempty"`
 }

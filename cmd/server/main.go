@@ -18,7 +18,7 @@ import (
 	"github.com/panospet/daily-news-aggregator/internal/cache"
 	"github.com/panospet/daily-news-aggregator/internal/config"
 	"github.com/panospet/daily-news-aggregator/internal/database"
-	"github.com/panospet/daily-news-aggregator/internal/gemini"
+	"github.com/panospet/daily-news-aggregator/internal/llm"
 	"github.com/panospet/daily-news-aggregator/internal/grouping"
 	"github.com/panospet/daily-news-aggregator/internal/handler"
 	"github.com/panospet/daily-news-aggregator/internal/models"
@@ -56,8 +56,8 @@ func main() {
 		log.Fatalf("Failed to load templates: %v", err)
 	}
 
-	if cfg.GeminiAPIKey == "" {
-		log.Println("WARNING: GEMINI_API_KEY not set — AI features disabled")
+	if cfg.CommandCodeAPIKey == "" {
+		log.Println("WARNING: COMMAND_CODE_API_KEY not set — AI features disabled")
 	}
 
 	if cfg.AuthUsername == "" || cfg.AuthPassword == "" {
@@ -75,14 +75,15 @@ func main() {
 		Timeout: 300 * time.Second,
 	}
 
-	geminiClient := &gemini.Client{
+	llmClient := &llm.Client{
 		HTTPClient: httpClient,
-		APIKey:     cfg.GeminiAPIKey,
+		CommandCodeAPIKey: cfg.CommandCodeAPIKey,
+		FallbackAPIKey:      cfg.FallbackAPIKey,
 	}
 
 	repo := &database.Repository{DB: db}
-	groupSvc := &grouping.Service{Gemini: geminiClient, Repo: repo, AIServiceURL: cfg.AIServiceURL}
-	summarizeSvc := &summarize.Service{Gemini: geminiClient, Extractor: summarize.NewExtractor()}
+	groupSvc := &grouping.Service{LLM: llmClient, Repo: repo, AIServiceURL: cfg.AIServiceURL}
+	summarizeSvc := &summarize.Service{LLM: llmClient, Extractor: summarize.NewExtractor()}
 
 	// Build the retry function (used for DB queries)
 	retryFn := func(hours int) (*models.DashboardData, error) {
@@ -101,12 +102,15 @@ func main() {
 		log.Println("Redis connected successfully")
 	}
 
+	aiCache := cache.NewAICache(redisClient, 60*time.Minute)
+
 	srv := &handler.Server{
 		Cfg:        cfg,
 		DB:         db,
 		Tpl:        tpl,
 		Cache:      cache.NewArticleCache(redisClient, 2*time.Minute),
-		AICache:    cache.NewAICache(redisClient, 60*time.Minute),
+		AICache:      aiCache,
+		SummaryCache: cache.NewSummaryCache(redisClient, 60*time.Minute),
 		GroupMap:   groupMap,
 		Summarizer: summarizeSvc,
 		FetchFn:    fetchFn,
@@ -128,6 +132,11 @@ func main() {
 	// clustering calls) on SIGINT/SIGTERM instead of dropping them.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	// Keep ai_cache warm on a timer so freshness no longer depends on somebody
+	// (or an external watchdog) opening a page. The 90s delay lets the AI
+	// service finish loading fastembed/spaCy before the first clustering call.
+	aiCache.StartBackgroundRefresh(ctx, db, fetchFn, 90*time.Second)
 
 	go func() {
 		log.Printf("🤖 Miniflux AI Dashboard starting on http://localhost%s", addr)

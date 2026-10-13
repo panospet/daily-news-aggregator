@@ -19,7 +19,7 @@ DB_PORT = int(os.getenv("MF_DB_PORT", "5433"))
 DB_NAME = os.getenv("MF_DB_NAME", "miniflux")
 DB_USER = os.getenv("MF_DB_USER", "external_reader")
 DB_PASS = os.getenv("MF_DB_PASSWORD", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+COMMAND_CODE_API_KEY = os.getenv("COMMAND_CODE_API_KEY", "")
 
 # Super-category groups for category-gated clustering.
 # Articles from different super-categories are NEVER clustered together.
@@ -102,9 +102,9 @@ def fetch_articles(hours=12):
     return articles
 
 
-def call_gemini_naming(topic, articles):
+def call_naming(topic, articles):
     """Call Gemini 2.5 Flash Lite to produce a short human-friendly Greek topic name"""
-    if not GEMINI_API_KEY:
+    if not COMMAND_CODE_API_KEY:
         return topic
 
     try:
@@ -119,20 +119,23 @@ def call_gemini_naming(topic, articles):
 Απάντησε ΜΟΝΟ με το JSON format:
 {{"topic": "Ο Ελληνικός Τίτλος"}}"""
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        req_body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json"
-            }
+        url = "https://api.commandcode.ai/provider/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {COMMAND_CODE_API_KEY}",
+            "Content-Type": "application/json"
         }
-        resp = requests.post(url, json=req_body, timeout=5)
+        req_body = {
+            "model": "Qwen/Qwen3.8-Flash",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"}
+        }
+        resp = requests.post(url, headers=headers, json=req_body, timeout=30)
         if resp.status_code == 200:
             res_json = resp.json()
-            parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])
-            if parts and parts[0].get("text"):
-                text = parts[0]["text"].strip()
+            choices = res_json.get("choices", [])
+            if choices:
+                text = choices[0].get("message", {}).get("content", "").strip()
                 data = json.loads(text)
                 if data.get("topic"):
                     return data["topic"].strip()
@@ -227,10 +230,10 @@ def group_articles(articles):
             if group["count"] > 1:
                 clusters_to_name.append(group)
     
-    if clusters_to_name and GEMINI_API_KEY:
+    if clusters_to_name and COMMAND_CODE_API_KEY:
         def fetch_name(g):
             temp_topic = g["topic"]
-            new_topic = call_gemini_naming(temp_topic, g["articles"])
+            new_topic = call_naming(temp_topic, g["articles"])
             g["topic"] = new_topic
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:

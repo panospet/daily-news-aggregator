@@ -88,7 +88,7 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 | File | Purpose |
 |------|---------|
 | `cmd/server/main.go` | Entrypoint. Wires config, DB, Redis, templates, grouping service, and HTTP server |
-| `internal/config/config.go` | Env-based config (`MF_DB_*`, `PORT`, `GEMINI_API_KEY`). Also has `CatDisplayName` map (old flat category names) |
+| `internal/config/config.go` | Env-based config (`MF_DB_*`, `PORT`, `COMMAND_CODE_API_KEY`). Also has `CatDisplayName` map (old flat category names) |
 | `internal/database/database.go` | Opens Postgres, creates `negative_feedback` table, `QueryArticles()` fetches last N hours, `SaveNegativeFeedback()` |
 | `internal/models/models.go` | All data structs: `Article`, `CategoryGroup` (flat), `AIGroup`, `AICategoryGroup`, `AIDashboardData` (clustered) |
 | `internal/cache/cache.go` | Redis dual-cache: `ArticleCache` (flat fallback, 2min), `AICache` (clustered, 60min, background refresh). Also `FetchFresh()` wiring function |
@@ -121,7 +121,7 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 |------|---------|
 | `docker-compose.yml` | All services: dashboard, ai-service, redis, miniflux, postgres, cloudflared, flaresolverr, flareproxy, db-cleanup |
 | `Dockerfile` | Go binary build (multi-stage) |
-| `.env` | Secrets: `MF_DB_*`, `GEMINI_API_KEY`, `AI_DISTANCE_THRESHOLD` |
+| `.env` | Secrets: `MF_DB_*`, `COMMAND_CODE_API_KEY`, `AI_DISTANCE_THRESHOLD` |
 | `.miniflux.env` | Miniflux + Postgres passwords, Cloudflare tokens |
 | `flareproxy/` | Python proxy for Cloudflare-protected feeds (gunicorn + requests) |
 | `cleanup-cron` | Cron script to purge old feed entries from Postgres |
@@ -133,7 +133,7 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 | Env Var | Default | Where Used | Notes |
 |---------|---------|------------|-------|
 | `AI_DISTANCE_THRESHOLD` | `0.45` | `ai/main.py` | AgglomerativeClustering cosine distance threshold. Currently set to `0.50` in `.env`. After evaluating recent negative/positive feedback, we switched `linkage` from `complete` to `average` and lowered the threshold to `0.50`. This combination perfectly merges cohesive large clusters (like the 12-article Marfin group) while aggressively shattering unrelated news (like distinct sports or music articles). |
-| `GEMINI_API_KEY` | _(empty)_ | `ai/main.py`, Go backend | Used for topic naming (AI service) and summarization (Go) |
+| `COMMAND_CODE_API_KEY` | _(empty)_ | `ai/main.py`, Go backend | Used for topic naming (AI service) and summarization (Go) |
 | `MF_DB_HOST` | `127.0.0.1` | Go backend | Postgres host |
 | `MF_DB_PORT` | `5433` | Go backend | Currently `5435` in `.env` |
 | `PORT` | `8080` | Go backend | Dashboard HTTP port |

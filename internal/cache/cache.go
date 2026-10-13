@@ -138,12 +138,31 @@ type FetchFunc func() (*models.AIDashboardData, error)
 type AICache struct {
 	client       *redis.Client
 	interval     time.Duration
+	checkEvery   time.Duration
 	refreshMutex sync.Mutex
 	refreshing   atomic.Bool
 }
 
 func NewAICache(client *redis.Client, interval time.Duration) *AICache {
-	return &AICache{client: client, interval: interval}
+	return &AICache{client: client, interval: interval, checkEvery: refreshCheckInterval(interval)}
+}
+
+// refreshCheckInterval is how often the background refresher looks at the cache
+// entry. It polls faster than the rebuild threshold so a stale entry is replaced
+// soon after it expires rather than up to a full interval late, with a floor so
+// a short interval doesn't turn into busy-polling.
+func refreshCheckInterval(interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return 5 * time.Minute
+	}
+	every := interval / 6
+	if every < 5*time.Minute {
+		every = 5 * time.Minute
+	}
+	if every > interval {
+		every = interval // never poll less often than the threshold it rebuilds against
+	}
+	return every
 }
 
 func (c *AICache) Get(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) (*models.AIDashboardData, error) {
@@ -211,6 +230,57 @@ func (c *AICache) refresh(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDas
 	c.refreshMutex.Unlock()
 
 	log.Printf("AI cache refreshed — %d articles in %d categories", newData.Total, len(newData.Categories))
+}
+
+// StartBackgroundRefresh keeps the AI cache warm on a timer instead of waiting
+// for a page view.
+//
+// Get() only spawns a rebuild when it is actually *called* and finds the entry
+// stale, so with no visitors the cache freezes and the site serves day-old
+// clustering until somebody opens a page. That made freshness depend on an
+// external watchdog poking the dashboard. This closes the gap from inside:
+// a rebuild shortly after boot (so a restart warms the cache without waiting a
+// whole interval), then one whenever the entry has aged past interval, until
+// ctx is cancelled.
+//
+// Safe to overlap with request-triggered refreshes: refresh() re-checks
+// staleness under a single-flight guard, so a tick landing mid-rebuild is a
+// no-op rather than a second expensive clustering run.
+func (c *AICache) StartBackgroundRefresh(ctx context.Context, db *sql.DB,
+	fetchFresh func(db *sql.DB) (*models.AIDashboardData, error), initialDelay time.Duration) {
+
+	// Poll faster than the interval so the cache is rebuilt soon after it goes
+	// stale, rather than up to a full interval late. Each poll is one Redis GET;
+	// the actual rebuild is decided by refresh() from the entry's real age.
+	checkEvery := c.checkEvery
+	if checkEvery <= 0 {
+		checkEvery = refreshCheckInterval(c.interval)
+	}
+
+	go func() {
+		if initialDelay > 0 {
+			select {
+			case <-time.After(initialDelay):
+			case <-ctx.Done():
+				return
+			}
+		}
+		log.Printf("AI cache background refresher started (check every %v, rebuild past %v)",
+			checkEvery, c.interval)
+		c.refresh(db, fetchFresh)
+
+		ticker := time.NewTicker(checkEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				c.refresh(db, fetchFresh)
+			case <-ctx.Done():
+				log.Println("AI cache background refresher stopped")
+				return
+			}
+		}
+	}()
 }
 
 func (c *AICache) refreshBlocking(db *sql.DB, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) (*models.AIDashboardData, error) {
@@ -282,7 +352,7 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 		}
 
 		t0 := time.Now()
-		groups, err := groupSvc.GroupArticles(allArticles)
+		groups, isFlatFallback, isLLMFallback, err := groupSvc.GroupArticles(allArticles)
 		if err != nil {
 			return nil, err
 		}
@@ -310,11 +380,15 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 
 		total := 0
 		tagFreq := make(map[string]int)
+		feedFreq := make(map[string]int)
 		for _, catGrp := range groups {
 			total += catGrp.Count
 			for _, grp := range catGrp.Groups {
 				for _, tag := range grp.Tags {
 					tagFreq[tag]++
+				}
+				for _, art := range grp.Articles {
+					feedFreq[art.Feed]++
 				}
 			}
 		}
@@ -330,12 +404,29 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 			return topTags[i].Count > topTags[j].Count
 		})
 
+		var topFeeds []models.FeedCount
+		for feed, count := range feedFreq {
+			if strings.EqualFold(feed, "to brief") {
+				continue
+			}
+			topFeeds = append(topFeeds, models.FeedCount{Feed: feed, Count: count})
+		}
+		sort.Slice(topFeeds, func(i, j int) bool {
+			if topFeeds[i].Count == topFeeds[j].Count {
+				return topFeeds[i].Feed < topFeeds[j].Feed
+			}
+			return topFeeds[i].Count > topFeeds[j].Count
+		})
+
 		loc, _ := time.LoadLocation("Europe/Athens")
 		return &models.AIDashboardData{
 			Categories: groups,
 			Total:      total,
 			Generated:  time.Now().In(loc).Format("15:04:05"),
+			IsFallback: isFlatFallback,
+			IsLLMFallback: isLLMFallback,
 			TopTags:    topTags,
+			TopFeeds:   topFeeds,
 		}, nil
 	}
 }

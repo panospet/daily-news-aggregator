@@ -1,5 +1,6 @@
 import os
 import time
+import hashlib
 import re
 import requests
 import httpx
@@ -15,7 +16,46 @@ from fastembed import TextEmbedding
 from contextlib import asynccontextmanager
 import html
 
+COMMAND_CODE_API_KEY = os.getenv("COMMAND_CODE_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+fallback_used_globally = False
+
+# In-process LLM caches. The AI service is long-lived, so this avoids asking
+# the provider to re-name or re-categorize identical article sets between cache
+# rebuilds without making the clustering output less fresh than the source data.
+_LLM_CACHE_TTL_SEC = 12 * 3600
+_NAMING_CACHE = {}
+_SINGLETON_CACHE = {}
+
+
+def _now() -> float:
+    return time.time()
+
+
+def _article_signature(article: dict) -> str:
+    value = article.get("id")
+    if value is not None:
+        return "id:" + str(value)
+    return "title:" + str(article.get("title", "")) + "|" + str(article.get("feed", ""))
+
+
+def _cluster_signature(articles) -> str:
+    ids = sorted(_article_signature(a) for a in articles)
+    return hashlib.sha256("|".join(ids).encode("utf-8")).hexdigest()
+
+
+def _cache_get(cache: dict, key: str):
+    entry = cache.get(key)
+    if not entry:
+        return None
+    if _now() - entry.get("ts", 0) > _LLM_CACHE_TTL_SEC:
+        del cache[key]
+        return None
+    return entry.get("value")
+
+
+def _cache_set(cache: dict, key: str, value):
+    cache[key] = {"value": value, "ts": _now()}
 
 CORE_CATEGORIES = [
     "Ελλάδα",
@@ -63,9 +103,18 @@ def extract_text(html_content):
     plain_text = re.sub(r'\s+', ' ', plain_text).strip()[:1000]
     return plain_text
 
-async def call_gemini_naming(topic, articles, client):
-    if not GEMINI_API_KEY:
-        return {"topic": topic, "core_tags": ["Διάφορα"], "custom_tags": []}
+
+async def call_naming(topic, articles, client):
+    global fallback_used_globally
+    cache_key = _cluster_signature(articles)
+    cached = _cache_get(_NAMING_CACHE, cache_key)
+    if cached is not None:
+        return cached
+
+    if not COMMAND_CODE_API_KEY and not GEMINI_API_KEY:
+        result = {"topic": topic, "core_tags": ["Διάφορα"], "custom_tags": []}
+        _cache_set(_NAMING_CACHE, cache_key, result)
+        return result
 
     try:
         articles_str = "\n".join([f"- {a['title']} ({a.get('feed', '')})" for a in articles])
@@ -79,25 +128,105 @@ async def call_gemini_naming(topic, articles, client):
 1. Γράψε έναν κατάλληλο, ελκυστικό, πολύ σύντομο (έως 8-10 λέξεις) τίτλο θεματικής (Topic) στα ΕΛΛΗΝΙΚΑ.
 2. Επίλεξε από 1 έως 3 κατηγορίες από την παρακάτω αυστηρή λίστα (Core Categories):
 {json.dumps(CORE_CATEGORIES, ensure_ascii=False)}
-3. Αν θέλεις, πρόσθεσε έως 2 δικές σου ειδικές ετικέτες (Custom Tags) που περιγράφουν πιο συγκεκριμένα το θέμα.
+3. Αν θέλεις, πρόσθεσε έως 2 δικές σου ειδικές ετικέτες (Custom Tags) που περιγράφουν πιο συγκεκριμένα το θέμα. ΕΙΔΙΚΑ αν επιλέξεις την κατηγορία "Νέες Κυκλοφορίες (Μουσική)", ΠΡΕΠΕΙ ΟΠΩΣΔΗΠΟΤΕ να προσθέσεις το μουσικό είδος (π.χ. "Rock", "Pop", "Hip Hop") στις ειδικές ετικέτες.
 
 Απάντησε ΜΟΝΟ με το παρακάτω JSON format:
 {{"topic": "Ο Ελληνικός Τίτλος", "core_tags": ["Κατηγορία 1", "Κατηγορία 2"], "custom_tags": ["Ειδική Ετικέτα 1"]}}"""
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
-        req_body = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.1,
-                "responseMimeType": "application/json"
-            }
+        async def _try_command_code():
+            if not COMMAND_CODE_API_KEY: return None
+            url = "https://api.commandcode.ai/provider/v1/chat/completions"
+            headers = {"Authorization": f"Bearer {COMMAND_CODE_API_KEY}", "Content-Type": "application/json"}
+            req_body = {"model": "MiniMaxAI/MiniMax-M3", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}
+            resp = await client.post(url, headers=headers, json=req_body, timeout=30.0)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                choices = res_json.get("choices", [])
+                if choices:
+                    text = choices[0].get("message", {}).get("content", "").strip()
+                    return text
+            return None
+            
+        async def _try_fallback():
+            if not GEMINI_API_KEY: return None
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+            req_body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.1, "responseMimeType": "application/json"}}
+            resp = await client.post(url, json=req_body, timeout=30.0)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                cands = res_json.get("candidates", [])
+                if cands:
+                    return cands[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+            return None
+
+        text = await _try_command_code()
+        if text is None:
+            text = await _try_fallback()
+            if text is not None:
+                fallback_used_globally = True
+            
+        if text:
+            text = text.replace("```json", "").replace("```", "").strip()
+            start_idx = text.find('{')
+            end_idx = text.rfind('}')
+            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+                text = text[start_idx:end_idx+1]
+            try:
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    for k in ["response", "text", "content", "answer"]:
+                        if k in data and isinstance(data[k], str) and "topic" in data[k]:
+                            try:
+                                inner_data = json.loads(data[k])
+                                if "topic" in inner_data: data = inner_data; break
+                            except: pass
+                if isinstance(data, dict) and data.get("topic"):
+                    result = {"topic": data.get("topic", topic).strip(), "core_tags": data.get("core_tags", ["Διάφορα"]), "custom_tags": data.get("custom_tags", [])}
+                    _cache_set(_NAMING_CACHE, cache_key, result)
+                    return result
+            except Exception as je:
+                print(f"LLM json error on text {repr(text)}: {je}")
+    except Exception as e:
+        import traceback; traceback.print_exc()
+    result = {"topic": topic, "core_tags": ["Διάφορα"], "custom_tags": []}
+    _cache_set(_NAMING_CACHE, cache_key, result)
+    return result
+
+
+    try:
+        articles_str = "\n".join([f"- {a['title']} ({a.get('feed', '')})" for a in articles])
+        prompt = f"""Είσαι βοηθός ονοματοδοσίας και κατηγοριοποίησης ειδήσεων. 
+Έχω μια ομάδα άρθρων που αναφέρονται στο ίδιο γεγονός. Ο προσωρινός τίτλος είναι: "{topic}".
+
+Παρακάτω είναι τα άρθρα:
+{articles_str}
+
+Αποστολή σου:
+1. Γράψε έναν κατάλληλο, ελκυστικό, πολύ σύντομο (έως 8-10 λέξεις) τίτλο θεματικής (Topic) στα ΕΛΛΗΝΙΚΑ.
+2. Επίλεξε από 1 έως 3 κατηγορίες από την παρακάτω αυστηρή λίστα (Core Categories):
+{json.dumps(CORE_CATEGORIES, ensure_ascii=False)}
+3. Αν θέλεις, πρόσθεσε έως 2 δικές σου ειδικές ετικέτες (Custom Tags) που περιγράφουν πιο συγκεκριμένα το θέμα. ΕΙΔΙΚΑ αν επιλέξεις την κατηγορία "Νέες Κυκλοφορίες (Μουσική)", ΠΡΕΠΕΙ ΟΠΩΣΔΗΠΟΤΕ να προσθέσεις το μουσικό είδος (π.χ. "Rock", "Pop", "Hip Hop") στις ειδικές ετικέτες.
+
+Απάντησε ΜΟΝΟ με το παρακάτω JSON format:
+{{"topic": "Ο Ελληνικός Τίτλος", "core_tags": ["Κατηγορία 1", "Κατηγορία 2"], "custom_tags": ["Ειδική Ετικέτα 1"]}}"""
+
+        url = "https://api.commandcode.ai/provider/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {COMMAND_CODE_API_KEY}",
+            "Content-Type": "application/json"
         }
-        resp = await client.post(url, json=req_body, timeout=8.0)
+        req_body = {
+            "model": "deepseek/deepseek-v4-flash-fast",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+            "response_format": {"type": "json_object"}
+        }
+        resp = await client.post(url, headers=headers, json=req_body, timeout=30.0)
         if resp.status_code == 200:
             res_json = resp.json()
-            parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])
-            if parts and parts[0].get("text"):
-                text = parts[0]["text"].strip()
+            choices = res_json.get("choices", [])
+            if choices:
+                text = choices[0].get("message", {}).get("content", "").strip()
                 text = text.replace("```json", "").replace("```", "").strip()
                 
                 # Extract valid JSON between first { and last }
@@ -108,6 +237,18 @@ async def call_gemini_naming(topic, articles, client):
                 
                 try:
                     data = json.loads(text)
+                    if isinstance(data, dict):
+                        # Deepseek often wraps the requested JSON in a "response" or "text" key
+                        for k in ["response", "text", "content", "answer"]:
+                            if k in data and isinstance(data[k], str) and "topic" in data[k]:
+                                try:
+                                    inner_data = json.loads(data[k])
+                                    if "topic" in inner_data:
+                                        data = inner_data
+                                        break
+                                except:
+                                    pass
+
                     if isinstance(data, dict) and data.get("topic"):
                         return {
                             "topic": data.get("topic", topic).strip(),
@@ -115,24 +256,39 @@ async def call_gemini_naming(topic, articles, client):
                             "custom_tags": data.get("custom_tags", [])
                         }
                 except Exception as je:
-                    print(f"Gemini json error on text {repr(text)}: {je}")
+                    print(f"LLM json error on text {repr(text)}: {je}")
     except Exception as e:
-        print(f"Gemini error: {e}")
+        import traceback; traceback.print_exc()
     return {"topic": topic, "core_tags": ["Διάφορα"], "custom_tags": []}
 
-async def call_gemini_batch_categorize(articles, client):
-    if not GEMINI_API_KEY or not articles:
+
+async def call_batch_categorize(articles, client):
+    global fallback_used_globally
+    if (not COMMAND_CODE_API_KEY and not GEMINI_API_KEY) or not articles:
         return [{"core_tags": ["Διάφορα"], "custom_tags": []} for _ in articles]
         
-    results = [{"core_tags": ["Διάφορα"], "custom_tags": []} for _ in articles]
+    signatures = [_article_signature(a) for a in articles]
+    cached_results = [None for _ in articles]
+    missing_indices = []
+    for i, article in enumerate(articles):
+        cached = _cache_get(_SINGLETON_CACHE, signatures[i])
+        if cached is not None:
+            cached_results[i] = cached
+        else:
+            missing_indices.append(i)
 
-    # Fire all batches concurrently (bounded) instead of sequentially —
-    # with ~10 batches this cuts categorization from minutes to seconds.
+    if not missing_indices:
+        return [cached_results[i] for i in range(len(articles))]
+
+    articles_to_process = [articles[i] for i in missing_indices]
+    missing_results = [{"core_tags": ["Διάφορα"], "custom_tags": []} for _ in articles_to_process]
+
     batch_size = 30
-    max_concurrent = 5
+    max_concurrent = 10
     semaphore = asyncio.Semaphore(max_concurrent)
 
     async def process_batch(batch_start, batch_articles):
+        global fallback_used_globally
         async with semaphore:
             try:
                 articles_str = ""
@@ -150,42 +306,61 @@ async def call_gemini_batch_categorize(articles, client):
 Λίστα Άρθρων:
 {articles_str}"""
 
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key={GEMINI_API_KEY}"
-                req_body = {
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {
-                        "temperature": 0.0,
-                        "responseMimeType": "application/json"
-                    }
-                }
-                resp = await client.post(url, json=req_body, timeout=15.0)
+                async def _try_command_code():
+                    if not COMMAND_CODE_API_KEY: return None
+                    url = "https://api.commandcode.ai/provider/v1/chat/completions"
+                    headers = {"Authorization": f"Bearer {COMMAND_CODE_API_KEY}", "Content-Type": "application/json"}
+                    req_body = {"model": "MiniMaxAI/MiniMax-M3", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "response_format": {"type": "json_object"}}
+                    resp = await client.post(url, headers=headers, json=req_body, timeout=180.0)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        choices = res_json.get("choices", [])
+                        if choices:
+                            return choices[0].get("message", {}).get("content", "").strip()
+                    return None
 
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    parts = res_json.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])
-                    if parts and parts[0].get("text"):
-                        text = parts[0]["text"].strip()
-                        text = text.replace("```json", "").replace("```", "").strip()
-                        try:
-                            data = json.loads(text)
-                            for k, v in data.items():
-                                idx = int(k)
-                                if 0 <= idx < len(batch_articles):
-                                    c_tags = v.get("core_tags", ["Διάφορα"]) if isinstance(v, dict) else ["Διάφορα"]
-                                    u_tags = v.get("custom_tags", []) if isinstance(v, dict) else []
-                                    results[batch_start + idx] = {"core_tags": c_tags, "custom_tags": u_tags}
-                        except Exception as je:
-                            print(f"Gemini batch json error: {je}")
+                async def _try_fallback():
+                    if not GEMINI_API_KEY: return None
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}"
+                    req_body = {"contents": [{"parts": [{"text": prompt}]}], "generationConfig": {"temperature": 0.0, "responseMimeType": "application/json"}}
+                    resp = await client.post(url, json=req_body, timeout=180.0)
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        cands = res_json.get("candidates", [])
+                        if cands:
+                            return cands[0].get("content", {}).get("parts", [{}])[0].get("text", "").strip()
+                    return None
+
+                text = await _try_command_code()
+                if text is None:
+                    text = await _try_fallback()
+                    if text is not None:
+                        fallback_used_globally = True
+                        
+                if text:
+                    text = text.replace("```json", "").replace("```", "").strip()
+                    try:
+                        data = json.loads(text)
+                        for k, v in data.items():
+                            idx = int(k)
+                            if 0 <= idx < len(batch_articles):
+                                c_tags = v.get("core_tags", ["Διάφορα"]) if isinstance(v, dict) else ["Διάφορα"]
+                                u_tags = v.get("custom_tags", []) if isinstance(v, dict) else []
+                                missing_results[batch_start + idx] = {"core_tags": c_tags, "custom_tags": u_tags}
+                    except Exception as je:
+                        print(f"LLM batch json error: {je}")
             except Exception as e:
-                print(f"Gemini batch class error: {e}")
+                print(f"LLM batch class error: {type(e).__name__} - {e}")
 
-    tasks = [
-        process_batch(batch_start, articles[batch_start:min(batch_start + batch_size, len(articles))])
-        for batch_start in range(0, len(articles), batch_size)
-    ]
+    tasks = [process_batch(b, articles_to_process[b:min(b + batch_size, len(articles_to_process))]) for b in range(0, len(articles_to_process), batch_size)]
     await asyncio.gather(*tasks)
 
-    return results
+    for pos, original_index in enumerate(missing_indices):
+        cached_results[original_index] = missing_results[pos]
+        _cache_set(_SINGLETON_CACHE, signatures[original_index], missing_results[pos])
+
+    return [cached_results[i] for i in range(len(articles))]
+
 
 def _same_script_matrix(texts) -> np.ndarray:
     """True[i, j] when texts[i] and texts[j] are written in the same script (e.g. both Greek).
@@ -248,7 +423,7 @@ def cluster_super_group(articles, precomputed_embeddings=None):
         for doc in nlp.pipe(texts, disable=["parser"]):
             lemmas = [t.lemma_ for t in doc if not t.is_punct and not t.is_stop]
             ents = [ent.text.replace(" ", "_") for ent in doc.ents]
-            enriched = lemmas + ents * 2
+            enriched = lemmas + ents * 5
             lemmatized_texts.append(" ".join(enriched))
 
         vectorizer = TfidfVectorizer(analyzer='word', token_pattern=r'(?u)\b\w+\b')
@@ -276,7 +451,7 @@ def cluster_super_group(articles, precomputed_embeddings=None):
     # only way to detect translated duplicates. Calibrated Aug 2026 on ~3700 real pairs:
     # the veto removed 139 false merges and re-united 27 true ones on a live 748-article batch.
     same_script_mask = _same_script_matrix(texts)
-    lexical_overlap_mask = sparse_distances <= 0.90
+    lexical_overlap_mask = sparse_distances <= 0.80
     strong_match_mask = dense_distances < 0.35
     vetoed_match_mask = strong_match_mask & same_script_mask & ~lexical_overlap_mask
     apply_mask = strong_match_mask & ~vetoed_match_mask
@@ -352,11 +527,14 @@ def search_embed(data: dict):
 
 @app.post("/cluster")
 def cluster(data: dict):
+    global fallback_used_globally
+    fallback_used_globally = False
     raw_articles = data.get("articles", [])
     precomputed = data.get("embeddings", None)
 
     if not raw_articles:
-        return {"categories": [], "total": 0, "generated": time.strftime("%H:%M:%S")}
+        return {"categories": [], "total": 0, "generated": time.strftime("%H:%M:%S"),
+        "is_fallback": fallback_used_globally}
 
     articles = []
     for a in raw_articles:
@@ -382,13 +560,13 @@ def cluster(data: dict):
         else:
             singletons.append(group_data)
 
-    if GEMINI_API_KEY:
-        t_gemini_start = time.time()
+    if COMMAND_CODE_API_KEY or GEMINI_API_KEY:
+        t_llm_start = time.time()
         
         async def fetch_all_ai_data():
             async with httpx.AsyncClient() as client:
                 async def fetch_name(g):
-                    result = await call_gemini_naming(g["topic"], g["articles"], client)
+                    result = await call_naming(g["topic"], g["articles"], client)
                     g["topic"] = result["topic"]
                     g["core_tags"] = result.get("core_tags", ["Διάφορα"])
                     g["custom_tags"] = result.get("custom_tags", [])
@@ -400,7 +578,7 @@ def cluster(data: dict):
                 if singletons:
                     articles_for_batch = [s["articles"][0] for s in singletons]
                     async def fetch_singletons():
-                        results = await call_gemini_batch_categorize(articles_for_batch, client)
+                        results = await call_batch_categorize(articles_for_batch, client)
                         for i, s in enumerate(singletons):
                             s["core_tags"] = results[i].get("core_tags", ["Διάφορα"])
                             s["custom_tags"] = results[i].get("custom_tags", [])
@@ -410,7 +588,7 @@ def cluster(data: dict):
                 await asyncio.gather(*tasks)
         
         asyncio.run(fetch_all_ai_data())
-        print(f"Gemini processing took: {time.time() - t_gemini_start:.2f}s")
+        print(f"Gemini processing took: {time.time() - t_llm_start:.2f}s")
 
     category_groups = defaultdict(list)
     total_articles = 0
@@ -448,6 +626,7 @@ def cluster(data: dict):
             if len(category_groups.get(cat, [])) > 0
         ],
         "total": unique_articles,
-        "generated": time.strftime("%H:%M:%S")
+        "generated": time.strftime("%H:%M:%S"),
+        "is_fallback": fallback_used_globally
     }
     return output

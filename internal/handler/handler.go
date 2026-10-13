@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	htmlpkg "html"
 	"html/template"
 	"log"
@@ -29,8 +30,9 @@ type Server struct {
 	Cache      *cache.ArticleCache
 	AICache    *cache.AICache
 	GroupMap   *cache.GroupMapping
-	Summarizer *summarize.Service
-	FetchFn    func(db *sql.DB) (*models.AIDashboardData, error)
+	Summarizer   *summarize.Service
+	SummaryCache *cache.SummaryCache
+	FetchFn      func(db *sql.DB) (*models.AIDashboardData, error)
 	RetryFn    func(hours int) (*models.DashboardData, error)
 	Repo       *database.Repository
 }
@@ -86,6 +88,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /cards", s.Cards)
 	mux.HandleFunc("GET /card-body", s.CardBody)
 	mux.HandleFunc("POST /summarize", s.HandleSummarize)
+	mux.HandleFunc("POST /summarize/stream", s.HandleSummarizeStream)
+	mux.HandleFunc("POST /summarize/more", s.HandleSummarizeMore)
+	mux.HandleFunc("POST /summarize-article", s.HandleSummarizeArticle)
 	mux.HandleFunc("POST /feedback", s.HandleFeedback)
 	mux.HandleFunc("POST /feedback/positive", s.HandlePositiveFeedback)
 }
@@ -276,6 +281,7 @@ func topView(data models.AIDashboardData) models.AIDashboardData {
 		Generated:  data.Generated,
 		IsFallback: data.IsFallback,
 		TopTags:    data.TopTags,
+		TopFeeds:   data.TopFeeds,
 		Categories: data.Categories,
 		View:       "top",
 	}
@@ -316,6 +322,7 @@ func (s *Server) CategoryFilter(w http.ResponseWriter, r *http.Request) {
 	filtered.Generated = data.Generated
 	filtered.IsFallback = data.IsFallback
 	filtered.TopTags = data.TopTags
+	filtered.TopFeeds = data.TopFeeds
 	filtered.View = "category"
 
 	// HTMX request: return only the articles partial
@@ -333,6 +340,7 @@ func tagView(data models.AIDashboardData, q string) models.AIDashboardData {
 	var filtered models.AIDashboardData
 	filtered.Generated = data.Generated
 	filtered.TopTags = data.TopTags
+	filtered.TopFeeds = data.TopFeeds
 	filtered.Categories = data.Categories // sidebar nav; stream renders TopGroups in this view
 	filtered.View = "tags"
 	// Deduplicate by group_id: the same multi-tagged group can match from
@@ -398,6 +406,49 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 		filtered.Query = strings.TrimPrefix(raw, "#")
 		filtered.Generated = data.Generated
 		filtered.TopTags = data.TopTags
+		filtered.TopFeeds = data.TopFeeds
+	} else if strings.HasPrefix(q, "feed:") {
+		// Feed view: flat list of articles from a specific feed.
+		// Use q (lowercase) to detect prefix, but we want the actual feed name,
+		// so we strip from raw using case-insensitive cut.
+		_, feedName, _ := strings.Cut(raw, ":")
+		feedName = strings.TrimSpace(feedName)
+		filtered.View = "feed"
+		filtered.Query = feedName
+		filtered.Generated = data.Generated
+		filtered.TopTags = data.TopTags
+		filtered.TopFeeds = data.TopFeeds
+		filtered.Categories = data.Categories // for sidebar
+
+		// Gather all articles for this feed across all groups
+		var feedArticles []models.Article
+		seenArt := make(map[int64]bool)
+		for _, g := range data.Categories {
+			for _, grp := range g.Groups {
+				for _, a := range grp.Articles {
+					if strings.EqualFold(a.Feed, feedName) && !seenArt[a.ID] {
+						seenArt[a.ID] = true
+						feedArticles = append(feedArticles, a)
+					}
+				}
+			}
+		}
+		sort.SliceStable(feedArticles, func(i, j int) bool {
+			return feedArticles[i].Published.After(feedArticles[j].Published)
+		})
+		
+		// Wrap in a dummy group so we can render it
+		filtered.TopGroups = []models.TopGroup{
+			{
+				Category: "Feed",
+				Group: models.AIGroup{
+					Topic: feedName,
+					Articles: feedArticles,
+					Count: len(feedArticles),
+				},
+			},
+		}
+		filtered.Total = len(feedArticles)
 	} else {
 		// Semantic search via embeddings
 		groups := s.semanticSearch(raw, data)
@@ -405,6 +456,7 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 			filtered.View = "search"
 			filtered.Categories = data.Categories // for sidebar
 			filtered.TopGroups = groups
+			filtered.TopFeeds = data.TopFeeds
 			for _, g := range groups {
 				filtered.Total += g.Group.Count
 			}
@@ -413,6 +465,7 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 			// Don't set View="search" here — that renders TopGroups (empty).
 			// Leave View="" so the template renders Categories sections.
 			qNorm := stripAccents(q)
+			filtered.TopFeeds = data.TopFeeds
 			for _, g := range data.Categories {
 				var matchedGroups []models.AIGroup
 				for _, grp := range g.Groups {
@@ -593,6 +646,11 @@ func (s *Server) Stats(w http.ResponseWriter, r *http.Request) {
 
 // HandleSummarize generates AI summaries for topic groups.
 func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		log.Printf("[handler] HandleSummarize took %v", time.Since(start))
+	}()
+
 	if r.Method != "POST" {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -623,8 +681,28 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cache hit: an unchanged group never needs another LLM call.
+	if cached, ok, cacheErr := s.SummaryCache.GetGroup(cat, groupID); cacheErr == nil && ok {
+		cachedTopic := targetTopic
+		if len(cached.Sources) > 0 && cached.Sources[0] != "" {
+			cachedTopic = cached.Sources[0]
+		}
+		formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(cached.Summary), "\n", "<br>")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary", map[string]interface{}{
+			"Topic":      cachedTopic,
+			"Summary":    template.HTML(formattedSummary),
+			"Articles":  targetGroup.Articles,
+			"Category":  cat,
+			"GroupID":   targetGroup.GroupID,
+			"Tags":      targetGroup.Tags,
+			"IsFallback": cached.IsFallback,
+		})
+		return
+	}
+
 	// No AI key — show fallback directly
-	if s.Cfg.GeminiAPIKey == "" {
+	if s.Cfg.CommandCodeAPIKey == "" {
 		targetGroup.Category = cat
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-fallback", targetGroup)
@@ -639,6 +717,11 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-fallback", targetGroup)
 		return
+	}
+
+	// Persist the generated summary so repeat clicks do not re-run the LLM.
+	if s.SummaryCache != nil {
+		_ = s.SummaryCache.SetGroup(cat, groupID, summary)
 	}
 
 	// Update cache data so the newly generated fancy topic persists
@@ -663,7 +746,221 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		"Category": cat,
 		"GroupID":  targetGroup.GroupID,
 		"Tags":     targetGroup.Tags,
+		"IsFallback": summary.IsFallback,
 	})
+}
+
+// sseSink turns the summarizer's stream callbacks into Server-Sent Events.
+type sseSink struct {
+	write func(event string, payload interface{}) error
+}
+
+func (s *sseSink) Delta(text string) error {
+	return s.write("delta", map[string]string{"delta": text})
+}
+
+func (s *sseSink) Reset() error {
+	return s.write("reset", map[string]string{})
+}
+
+// HandleSummarizeStream is HandleSummarize with the summary streamed as it is written.
+//
+// The reader gets `delta` events (clean text, safe to append with textContent), a
+// `reset` event when a failed grounding check makes the model start over, and a final
+// `done` event carrying the very same rendered HTML the non-streaming endpoint returns —
+// so the card ends up in exactly the state it would have, sources and buttons included.
+//
+// Streaming shows text before the grounding check has seen it; the check still runs on
+// the finished text, and a rejected summary is replaced by the fallback card in the
+// `done` event. Nothing unverified survives the request.
+func (s *Server) HandleSummarizeStream(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		log.Printf("[handler] HandleSummarizeStream took %v", time.Since(start))
+	}()
+
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+
+	cat := r.FormValue("category")
+	groupID := r.FormValue("group_id")
+
+	write := func(event string, payload interface{}) error {
+		body, err := json.Marshal(payload)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, body); err != nil {
+			return err
+		}
+		flusher.Flush()
+		return nil
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // never let a proxy buffer the stream
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	if err != nil {
+		_ = write("done", map[string]string{"error": "Data error"})
+		return
+	}
+
+	targetGroup, found := findGroup(data, cat, groupID)
+	if !found {
+		_ = write("done", map[string]string{"error": "Τα δεδομένα άλλαξαν. Κάνε ανανέωση και δοκίμασε ξανά."})
+		return
+	}
+
+	// Cache hit: render the cached summary as the final card with no LLM call.
+	if cached, ok, cacheErr := s.SummaryCache.GetGroup(cat, groupID); cacheErr == nil && ok {
+		cachedTopic := targetGroup.Topic
+		if len(cached.Sources) > 0 && cached.Sources[0] != "" {
+			cachedTopic = cached.Sources[0]
+		}
+		formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(cached.Summary), "\n", "<br>")
+		var buf bytes.Buffer
+		if err := s.Tpl.Partial.ExecuteTemplate(&buf, "summary", map[string]interface{}{
+			"Topic":      cachedTopic,
+			"Summary":    template.HTML(formattedSummary),
+			"Articles":   targetGroup.Articles,
+			"Category":   cat,
+			"GroupID":    targetGroup.GroupID,
+			"Tags":       targetGroup.Tags,
+			"IsFallback": cached.IsFallback,
+		}); err == nil {
+			_ = write("done", map[string]string{"html": buf.String()})
+			return
+		}
+	}
+
+	fallbackHTML := func() string {
+		var buf bytes.Buffer
+		_ = s.Tpl.Partial.ExecuteTemplate(&buf, "summary-fallback", targetGroup)
+		return buf.String()
+	}
+
+	if s.Cfg.CommandCodeAPIKey == "" {
+		_ = write("done", map[string]string{"html": fallbackHTML()})
+		return
+	}
+
+	sink := &sseSink{write: write}
+	summary, err := s.Summarizer.SummarizeStreamContext(r.Context(), targetGroup.Topic, targetGroup.Articles, sink)
+	if err != nil {
+		// Grounding failures land here too: the streamed text is discarded by the
+		// reader and the fallback card takes its place.
+		log.Printf("Summarize (stream) error: %v", err)
+		_ = write("done", map[string]string{
+			"html":  fallbackHTML(),
+			"error": "Summary unavailable",
+		})
+		return
+	}
+
+	// Persist the generated summary so a repeat click does not re-run the LLM.
+	if s.SummaryCache != nil {
+		_ = s.SummaryCache.SetGroup(cat, targetGroup.GroupID, summary)
+	}
+
+	targetTopic := targetGroup.Topic
+	if len(summary.Sources) > 0 && summary.Sources[0] != "" {
+		targetTopic = summary.Sources[0]
+		s.AICache.UpdateTopic(cat, targetGroup.GroupID, targetTopic)
+	}
+
+	// Same sanitising as the non-streaming path: escape everything, then reintroduce
+	// only our own paragraph breaks. (The interim streamed text was appended with
+	// textContent, so this card is the first thing rendered as HTML.)
+	formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(summary.Summary), "\n", "<br>")
+
+	var buf bytes.Buffer
+	if err := s.Tpl.Partial.ExecuteTemplate(&buf, "summary", map[string]interface{}{
+		"Topic":      targetTopic,
+		"Summary":    template.HTML(formattedSummary),
+		"Articles":   targetGroup.Articles,
+		"Category":   cat,
+		"GroupID":    targetGroup.GroupID,
+		"Tags":       targetGroup.Tags,
+		"IsFallback": summary.IsFallback,
+	}); err != nil {
+		_ = write("done", map[string]string{"html": fallbackHTML(), "error": "render error"})
+		return
+	}
+	_ = write("done", map[string]string{"html": buf.String()})
+}
+
+// HandleSummarizeMore generates a supplemental summary for a topic group.
+func (s *Server) HandleSummarizeMore(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		log.Printf("[handler] HandleSummarizeMore took %v", time.Since(start))
+	}()
+
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	cat := r.FormValue("category")
+	groupID := r.FormValue("group_id")
+	existingSummary := r.FormValue("existing_summary")
+
+	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	if err != nil {
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
+	}
+
+	var targetGroup models.AIGroup
+	var targetTopic string
+	found := false
+
+	targetGroup, found = findGroup(data, cat, groupID)
+	if found {
+		targetTopic = targetGroup.Topic
+	}
+
+	if !found {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<div class="summary-refresh">⚠️ Τα δεδομένα άλλαξαν. Κάνε <a href="/" hx-get="/" hx-target="body">ανανέωση</a> και δοκίμασε ξανά.</div>`))
+		return
+	}
+
+	if s.Cfg.CommandCodeAPIKey == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(`<div class="summary" style="margin-top: 15px; border-top: 1px dashed var(--line); padding-top: 15px;"><em>Supplemental summary unavailable (No API key).</em></div>`))
+		return
+	}
+
+	moreDetails, err := s.Summarizer.SummarizeMore(targetTopic, existingSummary, targetGroup.Articles)
+	if err != nil {
+		log.Printf("SummarizeMore error: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		// Instead of replacing the whole card on failure, just append an error message or do nothing
+		_, _ = w.Write([]byte(`<div class="summary" style="margin-top: 15px; border-top: 1px dashed var(--line); padding-top: 15px; color: var(--text-muted);"><em>Αποτυχία δημιουργίας επιπλέον σύνοψης.</em></div>`))
+		return
+	}
+
+	formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(moreDetails), "\n", "<br>")
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	// Render just the new summary piece so it can be appended
+	// Removing the button is handled by outerHTML swapping on the button itself.
+	_, _ = w.Write([]byte(fmt.Sprintf(`<div class="summary" style="margin-top: 15px; border-top: 1px dashed var(--line); padding-top: 15px;">%s</div>`, formattedSummary)))
 }
 
 // HandleFeedback stores negative feedback for an irrelevant article
@@ -765,4 +1062,88 @@ func (s *Server) HandlePositiveFeedback(w http.ResponseWriter, r *http.Request) 
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write([]byte(`<span class="feedback-success">Feedback received ✅</span>`))
+}
+
+// HandleSummarizeArticle generates an AI summary for a single article.
+func (s *Server) HandleSummarizeArticle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	articleID, _ := strconv.ParseInt(r.FormValue("article_id"), 10, 64)
+	if articleID == 0 {
+		http.Error(w, "Missing article_id", http.StatusBadRequest)
+		return
+	}
+
+	data, err := s.AICache.Get(s.DB, s.FetchFn)
+	if err != nil {
+		http.Error(w, "Data error", http.StatusInternalServerError)
+		return
+	}
+
+	var targetArticle *models.Article
+	for _, cg := range data.Categories {
+		for _, g := range cg.Groups {
+			for _, a := range g.Articles {
+				if a.ID == articleID {
+					// Need a copy so we can take the address safely
+					artCopy := a
+					targetArticle = &artCopy
+					break
+				}
+			}
+			if targetArticle != nil {
+				break
+			}
+		}
+		if targetArticle != nil {
+			break
+		}
+	}
+
+	if targetArticle == nil {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`<li class="summary-refresh">⚠️ Article not found.</li>`))
+		return
+	}
+
+	// Cache hit: a single article never needs another LLM call.
+	if cached, ok, cacheErr := s.SummaryCache.GetArticle(articleID); cacheErr == nil && ok {
+		formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(cached.Summary), "\n", "<br>")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-article", map[string]interface{}{
+			"Article": targetArticle,
+			"Summary": template.HTML(formattedSummary),
+		})
+		return
+	}
+
+	if s.Cfg.CommandCodeAPIKey == "" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-article-fallback", targetArticle)
+		return
+	}
+
+	summary, err := s.Summarizer.Summarize(targetArticle.Title, []models.Article{*targetArticle})
+	if err != nil {
+		log.Printf("Summarize article error: %v", err)
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-article-fallback", targetArticle)
+		return
+	}
+
+	if s.SummaryCache != nil {
+		_ = s.SummaryCache.SetArticle(articleID, summary)
+	}
+
+	formattedSummary := strings.ReplaceAll(htmlpkg.EscapeString(summary.Summary), "\n", "<br>")
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = s.Tpl.Partial.ExecuteTemplate(w, "summary-article", map[string]interface{}{
+		"Article": targetArticle,
+		"Summary": template.HTML(formattedSummary),
+	})
 }

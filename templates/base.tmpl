@@ -159,6 +159,128 @@ document.addEventListener('htmx:load', function(e) {
 document.addEventListener('htmx:responseError', function() { showToast('Something went wrong. Please try again.', 'error'); });
 document.addEventListener('htmx:sendError', function() { showToast('Network error. Please check your connection.', 'error'); });
 document.addEventListener('htmx:timeout', function() { showToast('Request timed out. Please try again.', 'error'); });
+
+// --- streaming summaries -------------------------------------------------------------
+// One LLM call, exactly as before, but the prose is rendered while it is written instead
+// of after ~19s of spinner. The streamed text is provisional: the server verifies each
+// finished summary against its sources and then swaps in the final card (or the
+// fallback), so what stays on screen is always the checked version.
+function parseSSEFrame(raw) {
+  var ev = 'message', data = '';
+  raw.split('\n').forEach(function(line) {
+    if (line.indexOf('event:') === 0) ev = line.slice(6).trim();
+    else if (line.indexOf('data:') === 0) data += line.slice(5).trim();
+  });
+  return { event: ev, data: data };
+}
+
+// The streaming target: the placeholder that ships in a freshly opened card, or — when
+// the 🔄 retry button is used on a card that already shows a summary — that card's own
+// summary element, cleared and reused so the new text visibly replaces the old.
+function ensureStreamBox(card) {
+  var box = card.querySelector('.summary--stream');
+  if (box) return box;
+  var existing = card.querySelector('.summary');
+  if (!existing) return null;
+  existing.textContent = '';
+  existing.classList.add('summary--stream');
+  var txt = document.createElement('span');
+  txt.className = 'summary__text';
+  existing.appendChild(txt);
+  existing.appendChild(buildStreamNote());
+  return existing;
+}
+
+// buildStreamNote mirrors the dots markup in templates/partials/articles.tmpl — keep the two
+// in step (three spans, animation staggered by CSS nth-child).
+function buildStreamNote() {
+  var note = document.createElement('em');
+  note.className = 'summary__note';
+  note.setAttribute('aria-hidden', 'true');
+  for (var i = 0; i < 3; i++) {
+    var dot = document.createElement('span');
+    dot.textContent = '.';
+    note.appendChild(dot);
+  }
+  return note;
+}
+
+async function streamSummary(btn) {
+  var card = btn.closest('.card');
+  if (!card) return;
+  var cat = btn.dataset.category, gid = btn.dataset.groupId;
+  var box = ensureStreamBox(card);
+  var textEl = box ? box.querySelector('.summary__text') : null;
+  var text = '';
+  var finish = function(html) {
+    var tpl = document.createElement('template');
+    tpl.innerHTML = html.trim();
+    var node = tpl.content.firstElementChild;
+    if (!node) return false;
+    card.replaceWith(node);
+    if (window.htmx) htmx.process(node);
+    // Deliberately NOT markAsRead here: the card is marked read when the reader closes
+    // it (closeCard), not when the summary lands. Grays out mid-read otherwise.
+    return true;
+  };
+  btn.disabled = true;
+  btn.classList.add('htmx-request');
+  if (box) { box.hidden = false; box.classList.remove('summary--failed'); }
+  if (textEl) textEl.textContent = '';
+  try {
+    var resp = await fetch('/summarize/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ category: cat, group_id: gid })
+    });
+    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+    var reader = resp.body.getReader(), dec = new TextDecoder(), buf = '', html = null, failure = null;
+    for (;;) {
+      var step = await reader.read();
+      if (step.done) break;
+      buf += dec.decode(step.value, { stream: true });
+      var cut;
+      while ((cut = buf.indexOf('\n\n')) >= 0) {
+        var frame = parseSSEFrame(buf.slice(0, cut));
+        buf = buf.slice(cut + 2);
+        var payload = {};
+        try { payload = JSON.parse(frame.data || '{}'); } catch (e) {}
+        if (frame.event === 'delta') {
+          text += (payload.delta || '');
+          if (textEl) textEl.textContent = text;
+        } else if (frame.event === 'reset') {
+          text = '';
+          if (textEl) textEl.textContent = '';
+        } else if (frame.event === 'done') {
+          html = payload.html || null;
+          failure = payload.error || null;
+        }
+      }
+    }
+    if (html && finish(html)) return;
+    throw new Error(failure || 'no summary returned');
+  } catch (err) {
+    // Fall back to the original non-streaming endpoint, which is also the one that can
+    // drop to native Gemini.
+    btn.disabled = false;
+    btn.classList.remove('htmx-request');
+    if (box) box.hidden = true;
+    if (window.htmx) {
+      htmx.ajax('POST', '/summarize', { values: { category: cat, group_id: gid }, target: card, swap: 'outerHTML' });
+    } else if (box) {
+      box.hidden = false;
+      box.classList.add('summary--failed');
+      if (textEl) textEl.textContent = '⚠️ ' + err.message;
+    }
+  }
+}
+
+document.addEventListener('click', function(e) {
+  var btn = e.target.closest('[data-stream-summarize]');
+  if (!btn) return;
+  e.preventDefault();
+  streamSummary(btn);
+});
 </script>
 <style>
 :root { color-scheme: dark; --bg:#07090d; --panel:#0d1117; --card:#10151d; --card-open:#151b25; --line:#1f2733; --text:#e6edf3; --muted:#8b949e; --dim:#6e7681; --acc:#58a6ff; --acc2:#bc8cff; --good:#3fb950; --warn:#d29922; --bad:#f85149; --mono:'IBM Plex Mono',monospace; --sans:'Roboto', 'Noto Sans', system-ui, sans-serif; }
@@ -240,8 +362,9 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
 .htmx-request .btn-sum__spinner { display:block; }
 .btn-unread { font-size:11px; padding:4px 8px; border:1px solid var(--line); border-radius:4px; color:var(--muted); margin-left:8px; }
 .btn-unread:hover { color:var(--text); border-color:var(--acc); }
-.btn-pos-feedback { font-size:13px; padding:2px 6px; border:none; background:none; cursor:pointer; opacity:0.6; transition:0.2s; margin-left:4px; }
-.btn-pos-feedback:hover { opacity:1; transform:scale(1.15); }
+.btn-pos-feedback, .btn-retry-sum { font-size:13px; padding:2px 6px; border:none; background:none; cursor:pointer; opacity:0.6; transition:0.2s; margin-left:4px; }
+.btn-pos-feedback:hover, .btn-retry-sum:hover { opacity:1; transform:scale(1.15); }
+.btn-retry-sum.htmx-request { animation:spin 1s linear infinite; pointer-events:none; opacity:0.3; }
 .src-label { font-family:var(--mono); font-size:9px; text-transform:uppercase; letter-spacing:0.1em; color:var(--dim); margin-bottom:10px; }
 .src-list { list-style:none; }
 .src-list li { padding:10px 0; border-top:1px solid var(--line); }
@@ -253,6 +376,20 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
 .fb:hover { opacity:1; }
 .summary { font-size:13px; line-height:1.7; margin-bottom:16px; color:var(--text); }
 .summary em { color:var(--muted); }
+/* Typing dots while a summary streams in. Decorative only — the card is replaced by the
+   verified version when the stream finishes, so this never outlives the request. */
+.summary__note { display:inline-flex; margin-left:5px; }
+.summary__note > span { display:inline-block; animation: summaryDot 1.3s infinite ease-in-out; }
+.summary__note > span:nth-child(2) { animation-delay:.18s; }
+.summary__note > span:nth-child(3) { animation-delay:.36s; }
+@keyframes summaryDot {
+  0%, 70%, 100% { opacity:.25; transform:translateY(0); }
+  35%           { opacity:1;   transform:translateY(-3px); }
+}
+.summary--failed .summary__note { display:none; }
+@media (prefers-reduced-motion: reduce) {
+  .summary__note > span { animation:none; opacity:.6; }
+}
 
 .empty { text-align:center; padding:60px 20px; color:var(--dim); }
 .empty__icon { font-size:40px; margin-bottom:12px; }
@@ -301,6 +438,14 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
         {{range .Categories}}<li><a class="nav__item" href="/filter?cat={{.Category | urlquery}}" hx-get="/filter?cat={{.Category | urlquery}}" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true"><span class="nav__icon">{{catIcon .Category}}</span>{{.Category}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
       </ul>
     </div>
+    {{if .TopFeeds}}
+    <div class="panel__section">
+      <div class="panel__label">Feeds</div>
+      <ul class="nav">
+        {{range .TopFeeds}}<li><a class="nav__item" href="/search?q=feed:{{.Feed | urlquery}}" hx-get="/search?q=feed:{{.Feed | urlquery}}" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true"><span class="nav__icon">📰</span>{{.Feed}}<span class="nav__count">{{.Count}}</span></a></li>{{end}}
+      </ul>
+    </div>
+    {{end}}
     {{if .TopTags}}
     <div class="panel__section">
       <div class="panel__label">Tags</div>
@@ -318,7 +463,7 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
     <div class="topbar">
       <button class="menu-btn" aria-label="Menu">☰</button>
       <div class="search"><input type="search" name="q" placeholder="Search stories, feeds, tags" hx-get="/search" hx-trigger="input changed delay:300ms, search" hx-target="#stream" hx-swap="outerHTML" autocomplete="off"></div>
-      <div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span></div>
+      <div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span>{{if .IsLLMFallback}}<span style="color: #f5a623; margin-left: 10px; font-size: 11px;">⚡ Gemini Fallback</span>{{end}}</div>
     </div>
     <div class="header">
       <div class="header__eyebrow">Daily Brief</div>
@@ -331,4 +476,4 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
 </body>
 </html>
 {{end}}
-{{define "stats-old"}}<div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span></div>{{end}}
+{{define "stats-old"}}<div class="meta"><span><b>{{.Total}}</b> articles</span><span>{{.Generated}}</span>{{if .IsLLMFallback}}<span style="color: #f5a623; margin-left: 10px; font-size: 11px;">⚡ Gemini Fallback</span>{{end}}</div>{{end}}

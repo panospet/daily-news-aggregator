@@ -10,13 +10,13 @@ import (
 	"time"
 
 	"github.com/panospet/daily-news-aggregator/internal/database"
-	"github.com/panospet/daily-news-aggregator/internal/gemini"
+	"github.com/panospet/daily-news-aggregator/internal/llm"
 	"github.com/panospet/daily-news-aggregator/internal/models"
 )
 
 // Service handles AI-powered article grouping.
 type Service struct {
-	Gemini gemini.Caller
+	LLM llm.Caller
 	Repo   *database.Repository
 	// BaseURL of the Python AI clustering service, e.g. http://127.0.0.1:8001
 	AIServiceURL string
@@ -24,7 +24,7 @@ type Service struct {
 
 // GroupArticles calls the Python AI service to cluster articles.
 // Falls back to flat grouping if the service fails.
-func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICategoryGroup, error) {
+func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICategoryGroup, bool, bool, error) {
 	tTotal := time.Now()
 
 	// Collect article IDs and fetch pre-computed embeddings
@@ -46,29 +46,29 @@ func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICatego
 
 	// Build request (embeddings are NOT sent in the payload to keep it small;
 	// the AI service computes them on the fly, and we store them afterwards for search)
-	reqPayload := map[string]interface{}{"articles": allArticles}
+	reqPayload := map[string]interface{}{"articles": allArticles, "embeddings": precomputed}
 
 	reqBody, err := json.Marshal(reqPayload)
 	if err != nil {
-		return s.fallbackFlat(allArticles), nil
+		return s.fallbackFlat(allArticles), true, false, nil
 	}
 
-	client := &http.Client{Timeout: 1800 * time.Second}
+	client := &http.Client{Timeout: 3600 * time.Second}
 	resp, err := client.Post(s.AIServiceURL+"/cluster", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[clustering] AI service call failed: %v", err)
-		return nil, err
+		return nil, false, false, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
 		log.Printf("[clustering] AI service call failed with status: %d", resp.StatusCode)
-		return nil, fmt.Errorf("AI service returned status %d", resp.StatusCode)
+		return nil, false, false, fmt.Errorf("AI service returned status %d", resp.StatusCode)
 	}
 
 	var data models.AIDashboardData
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		log.Printf("[clustering] failed to unmarshal AI service response: %v", err)
-		return s.fallbackFlat(allArticles), nil
+		return s.fallbackFlat(allArticles), true, false, nil
 	}
 
 	log.Printf("[clustering] Remote AI clustering completed in %v", time.Since(tTotal))
@@ -86,7 +86,7 @@ func (s *Service) GroupArticles(allArticles []models.Article) ([]models.AICatego
 		}
 	}
 
-	return data.Categories, nil
+	return data.Categories, false, data.IsFallback, nil
 }
 
 // computeAndStoreEmbeddings calls the AI embed endpoint for articles missing embeddings
@@ -100,7 +100,7 @@ func (s *Service) computeAndStoreEmbeddings(articles []models.Article) {
 		return
 	}
 
-	client := &http.Client{Timeout: 1800 * time.Second}
+	client := &http.Client{Timeout: 3600 * time.Second}
 	resp, err := client.Post(s.AIServiceURL+"/embed", "application/json", bytes.NewBuffer(reqBody))
 	if err != nil {
 		log.Printf("[embeddings] Failed to call embed endpoint: %v", err)

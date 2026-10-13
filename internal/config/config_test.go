@@ -46,7 +46,7 @@ func TestLoad_Defaults(t *testing.T) {
 	// Clear any env vars that might interfere
 	t.Setenv("MF_DB_HOST", "")
 	t.Setenv("PORT", "")
-	t.Setenv("GEMINI_API_KEY", "")
+	t.Setenv("COMMAND_CODE_API_KEY", "")
 
 	cfg := Load()
 	if cfg.DBHost != "127.0.0.1" {
@@ -60,7 +60,7 @@ func TestLoad_Defaults(t *testing.T) {
 func TestLoad_WithEnvOverrides(t *testing.T) {
 	t.Setenv("MF_DB_HOST", "db.example.com")
 	t.Setenv("PORT", "3000")
-	t.Setenv("GEMINI_API_KEY", "test-key-123")
+	t.Setenv("COMMAND_CODE_API_KEY", "test-key-123")
 
 	cfg := Load()
 	if cfg.DBHost != "db.example.com" {
@@ -69,7 +69,7 @@ func TestLoad_WithEnvOverrides(t *testing.T) {
 	if cfg.HTTPPort != 3000 {
 		t.Errorf("expected 3000, got %d", cfg.HTTPPort)
 	}
-	if cfg.GeminiAPIKey != "test-key-123" {
-		t.Errorf("expected test-key-123, got %q", cfg.GeminiAPIKey)
+	if cfg.CommandCodeAPIKey != "test-key-123" {
+		t.Errorf("expected test-key-123, got %q", cfg.CommandCodeAPIKey)
 	}
 }
