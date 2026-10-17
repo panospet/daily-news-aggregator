@@ -14,7 +14,8 @@ type Config struct {
 	DBPass       string
 	HTTPPort     int
 	CommandCodeAPIKey string
-	FallbackAPIKey string
+	CommandCodeModel  string
+	FallbackAPIKey    string
 	AuthUsername string
 	AuthPassword string
 	AIServiceURL string
@@ -31,6 +32,7 @@ func Load() Config {
 		DBPass:       EnvStr("MF_DB_PASSWORD", ""),
 		HTTPPort:     EnvInt("PORT", 8080),
 		CommandCodeAPIKey: EnvStr("COMMAND_CODE_API_KEY", ""),
+		CommandCodeModel:  EnvStr("COMMAND_CODE_MODEL", "MiniMaxAI/MiniMax-M3"),
 		FallbackAPIKey:      EnvStr("GEMINI_API_KEY", ""),
 		AuthUsername: EnvStr("AUTH_USERNAME", ""),
 		AuthPassword: EnvStr("AUTH_PASSWORD", ""),

@@ -18,6 +18,7 @@ import html
 
 COMMAND_CODE_API_KEY = os.getenv("COMMAND_CODE_API_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+COMMAND_CODE_MODEL = os.getenv("COMMAND_CODE_MODEL", "MiniMaxAI/MiniMax-M3")
 fallback_used_globally = False
 
 # In-process LLM caches. The AI service is long-lived, so this avoids asking
@@ -137,7 +138,7 @@ async def call_naming(topic, articles, client):
             if not COMMAND_CODE_API_KEY: return None
             url = "https://api.commandcode.ai/provider/v1/chat/completions"
             headers = {"Authorization": f"Bearer {COMMAND_CODE_API_KEY}", "Content-Type": "application/json"}
-            req_body = {"model": "MiniMaxAI/MiniMax-M3", "messages": [{"role": "user", "content": prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}
+            req_body = {"model": COMMAND_CODE_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.1, "response_format": {"type": "json_object"}}
             resp = await client.post(url, headers=headers, json=req_body, timeout=30.0)
             if resp.status_code == 200:
                 res_json = resp.json()
@@ -310,7 +311,7 @@ async def call_batch_categorize(articles, client):
                     if not COMMAND_CODE_API_KEY: return None
                     url = "https://api.commandcode.ai/provider/v1/chat/completions"
                     headers = {"Authorization": f"Bearer {COMMAND_CODE_API_KEY}", "Content-Type": "application/json"}
-                    req_body = {"model": "MiniMaxAI/MiniMax-M3", "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "response_format": {"type": "json_object"}}
+                    req_body = {"model": COMMAND_CODE_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.0, "response_format": {"type": "json_object"}}
                     resp = await client.post(url, headers=headers, json=req_body, timeout=180.0)
                     if resp.status_code == 200:
                         res_json = resp.json()

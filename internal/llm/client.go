@@ -16,6 +16,7 @@ import (
 type Client struct {
 	HTTPClient        *http.Client
 	CommandCodeAPIKey string
+	CommandCodeModel  string
 	FallbackAPIKey      string
 	// Endpoint overrides the Command Code chat-completions URL. Empty means production;
 	// tests point it at an httptest server.
@@ -31,6 +32,15 @@ func (c *Client) endpoint() string {
 		return c.Endpoint
 	}
 	return commandCodeURL
+}
+
+// model returns the Command Code model id to use, defaulting to the
+// historical MiniMax model when unset.
+func (c *Client) model() string {
+	if c.CommandCodeModel != "" {
+		return c.CommandCodeModel
+	}
+	return "MiniMaxAI/MiniMax-M3"
 }
 
 // Caller is the interface for making API calls.
@@ -135,7 +145,7 @@ type nativeRequest struct {
 // ---------- public methods ----------
 
 func (c *Client) Call(prompt string, schema *Schema) (string, bool, error) {
-	resp, err := c.CallWithModel(prompt, "MiniMaxAI/MiniMax-M3", 65536, schema)
+	resp, err := c.CallWithModel(prompt, c.model(), 65536, schema)
 	if err != nil {
 		log.Printf("[LLM] CommandCode call failed: %v. Falling back to native Gemini...", err)
 		fallbackResp, fErr := c.CallNativeFallback(prompt, schema)
@@ -148,7 +158,7 @@ func (c *Client) Call(prompt string, schema *Schema) (string, bool, error) {
 }
 
 func (c *Client) CallGrouping(prompt string) (string, bool, error) {
-	resp, err := c.CallWithModel(prompt, "MiniMaxAI/MiniMax-M3", 65536, nil)
+	resp, err := c.CallWithModel(prompt, c.model(), 65536, nil)
 	if err != nil {
 		log.Printf("[LLM] CommandCode grouping failed: %v. Falling back to native Gemini...", err)
 		fallbackResp, fErr := c.CallNativeFallback(prompt, nil)
@@ -304,7 +314,7 @@ func (c *Client) CallStreamContext(ctx context.Context, prompt string, schema *S
 	}
 
 	req := request{
-		Model: "MiniMaxAI/MiniMax-M3",
+		Model: c.model(),
 		Messages: []Message{
 			{Role: "user", Content: prompt},
 		},

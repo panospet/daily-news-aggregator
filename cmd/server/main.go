@@ -78,6 +78,7 @@ func main() {
 	llmClient := &llm.Client{
 		HTTPClient: httpClient,
 		CommandCodeAPIKey: cfg.CommandCodeAPIKey,
+		CommandCodeModel:  cfg.CommandCodeModel,
 		FallbackAPIKey:      cfg.FallbackAPIKey,
 	}
 
