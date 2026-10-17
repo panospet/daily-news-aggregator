@@ -34,6 +34,9 @@ services:
 
   miniflux:
     image: miniflux/miniflux:latest
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
     ports:
       - "9292:8080"
     depends_on:
