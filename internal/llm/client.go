@@ -385,7 +385,18 @@ func (c *Client) CallStreamContext(ctx context.Context, prompt string, schema *S
 		return out.String(), fmt.Errorf("stream read: %w", err)
 	}
 	if out.Len() == 0 {
-		return "", fmt.Errorf("empty stream from provider")
+		// Reasoning models sometimes stream only reasoning tokens and never
+		// emit a content delta. Fall back to a non-streaming call (which
+		// also has the native Gemini fallback) so the caller still gets a
+		// usable answer instead of an empty stream.
+		resp, _, err := c.Call(prompt, schema)
+		if err != nil {
+			return "", fmt.Errorf("empty stream from provider; fallback failed: %w", err)
+		}
+		if onDelta != nil && resp != "" {
+			_ = onDelta(resp)
+		}
+		return resp, nil
 	}
 	return out.String(), nil
 }
