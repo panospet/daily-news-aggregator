@@ -43,7 +43,8 @@ func TestTimeAgo_OneHour(t *testing.T) {
 func TestTimeAgo_Days(t *testing.T) {
 	past := time.Now().Add(-48 * time.Hour)
 	result := TimeAgo(past)
-	expected := past.Format("Jan 2 15:04")
+	loc, _ := time.LoadLocation("Europe/Athens")
+	expected := past.In(loc).Format("Jan 2 15:04")
 	if result != expected {
 		t.Errorf("expected %q, got %q", expected, result)
 	}
