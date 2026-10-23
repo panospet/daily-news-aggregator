@@ -81,6 +81,11 @@ func (s *Service) SummarizeStreamContext(ctx context.Context, topic string, arti
 			}
 			raw.WriteString(delta)
 			visible := decodePartialJSONString(summaryFieldSoFar(raw.String()))
+			// Hide source citations ([1], [2][5], ...) from the streamed text:
+			// they are still produced and verified server-side, but never shown
+			// to the reader. Hold back any trailing partial citation so a stray
+			// "[1" never flashes before its closing bracket arrives.
+			visible = stripCitationsForStream(visible)
 			if len(visible) <= sent {
 				return nil
 			}
@@ -519,6 +524,20 @@ type articleData struct {
 var citationRe = regexp.MustCompile(`\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)\]`)
 var stripCitationRe = regexp.MustCompile(`\s*\[\s*(?:\d+\s*(?:,\s*\d+\s*)*)\]`)
 var numRe = regexp.MustCompile(`\d+`)
+
+// stripCitationsForStream removes complete [n]-style citations from s and
+// truncates at the last unmatched '[' so a partial citation never leaks to
+// the reader while it is still being received. Used only for streamed output;
+// the full (cited) text is still verified server-side.
+func stripCitationsForStream(s string) string {
+	s = stripCitationRe.ReplaceAllString(s, "")
+	if idx := strings.LastIndex(s, "["); idx >= 0 {
+		if !strings.Contains(s[idx:], "]") {
+			s = s[:idx]
+		}
+	}
+	return s
+}
 
 // verifyGrounded returns "" when the summary passes, or a rejection reason.
 //

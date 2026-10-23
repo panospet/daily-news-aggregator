@@ -322,3 +322,21 @@ func TestEnrichGroup_SkipsLongArticles(t *testing.T) {
 	e.EnrichGroup(context.Background(), arts)
 	// no fetches attempted; content untouched — nothing to assert beyond no panic
 }
+
+func TestStripCitationsForStream(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"Καλημέρα [1].", "Καλημέρα."},
+		{"Νέα εξέλιξη [1][2] στην υπόθεση.", "Νέα εξέλιξη στην υπόθεση."},
+		{"Μερικό κείμενο [1", "Μερικό κείμενο "},
+		{"Χωρίς παραπομπές.", "Χωρίς παραπομπές."},
+	}
+	for _, tc := range cases {
+		got := stripCitationsForStream(tc.in)
+		if got != tc.want {
+			t.Errorf("stripCitationsForStream(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

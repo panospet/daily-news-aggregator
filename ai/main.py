@@ -78,9 +78,110 @@ CORE_CATEGORIES = [
     "Διάφορα"
 ]
 
+# Human-readable descriptions for each core category, used for
+# embedding-based (local, no-LLM) zero-shot categorization of singleton articles.
+CORE_CATEGORY_DESCRIPTIONS = {
+    "Ελλάδα": "Ελληνικές ειδήσεις, Ελλάδα, εγχώρια γεγονότα και νέα",
+    "Κόσμος": "Διεθνείς ειδήσεις, κόσμος, εξωτερική πολιτική",
+    "Πολιτική & Διπλωματία": "Πολιτική, κυβέρνηση, βουλή, διπλωματία, εκλογές",
+    "Οικονομία & Ενέργεια": "Οικονομία, αγορές, ενέργεια, επιχειρήσεις, χρηματιστήριο",
+    "Κοινωνία": "Κοινωνία, κοινωνικά ζητήματα, εκπαίδευση, υγεία, μετανάστευση",
+    "Έγκλημα & Αστυνομικό": "Έγκλημα, αστυνομία, δικαιοσύνη, δίκες, συλλήψεις",
+    "Περιβάλλον & Φυσικές Καταστροφές": "Περιβάλλον, κλίμα, φυσικές καταστροφές, πυρκαγιές, σεισμοί, πλημμύρες",
+    "Πόλεμος & Συγκρούσεις": "Πόλεμος, συγκρούσεις, στρατός, γεωπολιτική, τρομοκρατία",
+    "Αθλητισμός": "Αθλητισμός, ποδόσφαιρο, μπάσκετ, αγώνες, πρωταθλήματα",
+    "Πολιτισμός & Showbiz": "Πολιτισμός, κινηματογράφος, τηλεόραση, celebrities, showbiz, τέχνη",
+    "Καιρός": "Καιρός, πρόγνωση, θερμοκρασίες, βροχές, καύσωνας",
+    "Τεχνολογία & Επιστήμη": "Τεχνολογία, επιστήμη, AI, gadgets, διαστήματα",
+    "Lifestyle & Περίεργα": "Lifestyle, περίεργα, διατροφή, ταξίδια, υγεία και ευεξία",
+    "Μουσική": "Μουσική, συναυλίες, καλλιτέχνες, φεστιβάλ",
+    "Νέες Κυκλοφορίες (Μουσική)": "Νέες μουσικές κυκλοφορίες, νέα τραγούδια, νέα άλμπουμ, single release, νέο single",
+    "Άρθρα Γνώμης": "Άρθρα γνώμης, σχόλια, αναλύσεις, editorial, απόψεις",
+    "Διάφορα": "Διάφορα, γενικά θέματα",
+}
+
+
+def local_categorize_singletons(articles):
+    """Categorize singleton articles locally using embedding similarity to
+    category descriptions. No LLM calls. Returns list of dicts with
+    core_tags and custom_tags, aligned with input order."""
+    if not articles or model is None:
+        return [{"core_tags": ["Διάφορα"], "custom_tags": []} for _ in articles]
+
+    cat_names = CORE_CATEGORIES
+    category_embs = get_cat_embs()
+    if category_embs is None:
+        cat_texts = [CORE_CATEGORY_DESCRIPTIONS.get(c, c) for c in cat_names]
+        category_embs = np.array(list(model.embed(cat_texts, batch_size=16)))
+        norms = np.linalg.norm(category_embs, axis=1, keepdims=True)
+        category_embs = category_embs / np.where(norms == 0, 1e-12, norms)
+
+    art_texts = []
+    for a in articles:
+        content = extract_text(a.get("content", ""))
+        snippet = " ".join(content.split()[:40])
+        art_texts.append(f"{a.get('title', '').strip()} {snippet}".strip())
+
+    art_embs = np.array(list(model.embed(art_texts, batch_size=16)))
+    norms = np.linalg.norm(art_embs, axis=1, keepdims=True)
+    art_embs = art_embs / np.where(norms == 0, 1e-12, norms)
+
+    SIM_THRESHOLD = 0.25
+    results = []
+    for i in range(len(articles)):
+        sims = category_embs @ art_embs[i]
+        ranked = sorted(range(len(cat_names)), key=lambda j: float(sims[j]), reverse=True)
+        top_score = float(sims[ranked[0]])
+        chosen = []
+        for j in ranked:
+            if len(chosen) >= 3:
+                break
+            if float(sims[j]) >= SIM_THRESHOLD and (not chosen or (top_score - float(sims[j]) <= 0.07)):
+                chosen.append(cat_names[j])
+            else:
+                break
+        if not chosen:
+            chosen = [cat_names[ranked[0]]]
+        # Deduplicate
+        seen = set()
+        uniq = []
+        for c in chosen:
+            if c not in seen:
+                seen.add(c)
+                uniq.append(c)
+        results.append({"core_tags": uniq, "custom_tags": []})
+    return results
+
+
 # Global embedding model (loaded on startup)
 model = None
 nlp = None
+cat_embs = None
+
+def get_cat_embs():
+    global cat_embs
+    if cat_embs is None and model is not None:
+        cat_texts = [CORE_CATEGORY_DESCRIPTIONS.get(c, c) for c in CORE_CATEGORIES]
+        raw_cat_embs = np.array(list(model.embed(cat_texts, batch_size=16)))
+        cat_norms = np.linalg.norm(raw_cat_embs, axis=1, keepdims=True)
+        cat_embs = raw_cat_embs / np.where(cat_norms == 0, 1e-12, cat_norms)
+    return cat_embs
+
+def clean_title(title: str, feed: str = "") -> str:
+    if not title:
+        return ""
+    # Strip media tags like (vid), [video], (pics), (εικόνες), (βίντεο)
+    t = re.sub(r'\s*[\(\[](?:vid|video|pics?|εικόνες|βίντεο|φωτογραφίες)[\)\]]\s*', ' ', title, flags=re.IGNORECASE)
+    # Strip publisher branding prefixes or suffixes:
+    t = re.sub(r'\s*[-–—|]\s*(?:in\.gr|documento|ertnews|newsit|protothema|gazzetta|sport24|kathimerini|iefimerida|cnn greece|skai|lifo|newsbeast|tovima|ethnos|naftemporiki|avgi|newsbomb|euro2day|sdna|sdna\.gr|gazzetta\.gr|sport24\.gr|news247|news247\.gr|capital|mononews).*$', '', t, flags=re.IGNORECASE)
+    if feed:
+        clean_feed = re.sub(r'\s*(?:rss|feed|news)\s*', '', feed, flags=re.IGNORECASE).strip()
+        if clean_feed and len(clean_feed) > 2:
+            t = re.sub(rf'\s*[-–—|:]\s*{re.escape(clean_feed)}.*$', '', t, flags=re.IGNORECASE)
+            t = re.sub(rf'^{re.escape(clean_feed)}\s*[-–—|:]\s*', '', t, flags=re.IGNORECASE)
+    t = re.sub(r'^\s*(?:in\.gr|documento|ertnews|newsit|protothema|gazzetta|sport24|kathimerini|iefimerida|cnn greece|skai|lifo|newsbeast|tovima|ethnos|naftemporiki|avgi|newsbomb|euro2day)\s*[-–—:]\s*', '', t, flags=re.IGNORECASE)
+    cleaned = re.sub(r'\s+', ' ', t).strip()
+    return cleaned if cleaned else title.strip()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -90,7 +191,9 @@ async def lifespan(app: FastAPI):
     print("Loading spaCy model...")
     import spacy
     nlp = spacy.load("el_core_news_md")
-    print("Models loaded successfully.")
+    print("Pre-embedding category descriptions...")
+    get_cat_embs()
+    print("Models and category embeddings loaded successfully.")
     yield
     print("Shutting down AI service.")
 
@@ -378,6 +481,13 @@ def _same_script_matrix(texts) -> np.ndarray:
 def cluster_super_group(articles, precomputed_embeddings=None):
     distance_threshold = float(os.getenv("AI_DISTANCE_THRESHOLD", "0.45"))
     if len(articles) < 2:
+        if articles and model is not None:
+            content_words = articles[0].get('text', '').split()[:50]
+            content_snippet = " ".join(content_words)
+            text = f"{articles[0].get('title', '').strip()} {content_snippet}".strip()
+            emb = np.array(list(model.embed([text], batch_size=16)))[0]
+            norm = np.linalg.norm(emb)
+            articles[0]["_emb"] = emb / (norm or 1.0)
         return [[a] for a in articles]
 
     texts = []
@@ -415,6 +525,11 @@ def cluster_super_group(articles, precomputed_embeddings=None):
         embeddings = np.array(list(embeddings_gen))
         
     t1 = time.time()
+    
+    emb_norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    norm_embeddings = embeddings / np.where(emb_norms == 0, 1e-12, emb_norms)
+    for i, a in enumerate(articles):
+        a["_emb"] = norm_embeddings[i]
     
     dense_distances = cosine_distances(embeddings)
     t2 = time.time()
@@ -526,6 +641,95 @@ def search_embed(data: dict):
     return {"embeddings": embeddings}
 
 
+def process_groups_embedding_only(all_clusters):
+    category_embs = get_cat_embs()
+    processed_groups = []
+
+    for cluster_arts in all_clusters:
+        cluster_arts.sort(key=lambda x: x.get("published_at", ""), reverse=True)
+
+        valid_embs = [a["_emb"] for a in cluster_arts if "_emb" in a]
+        if len(valid_embs) == len(cluster_arts) and len(valid_embs) > 0:
+            cluster_embs = np.array(valid_embs)
+            centroid = np.mean(cluster_embs, axis=0, keepdims=True)
+            centroid_norm = centroid / (np.linalg.norm(centroid) or 1.0)
+        else:
+            texts = [f"{a.get('title', '')} {' '.join(extract_text(a.get('content', '')).split()[:40])}".strip() for a in cluster_arts]
+            if model is not None:
+                cluster_embs = np.array(list(model.embed(texts, batch_size=16)))
+                t_norms = np.linalg.norm(cluster_embs, axis=1, keepdims=True)
+                cluster_embs = cluster_embs / np.where(t_norms == 0, 1e-12, t_norms)
+                centroid = np.mean(cluster_embs, axis=0, keepdims=True)
+                centroid_norm = centroid / (np.linalg.norm(centroid) or 1.0)
+            else:
+                cluster_embs = np.zeros((len(cluster_arts), 1))
+                centroid_norm = np.zeros((1, 1))
+
+        # 1. Topic Naming via Medoid Selection
+        if len(cluster_arts) == 1:
+            chosen_title = clean_title(cluster_arts[0].get("title", ""), cluster_arts[0].get("feed", ""))
+        else:
+            sims = (cluster_embs @ centroid_norm.T).flatten()
+            best_idx = int(np.argmax(sims))
+            chosen_title = clean_title(cluster_arts[best_idx].get("title", ""), cluster_arts[best_idx].get("feed", ""))
+            if not chosen_title:
+                chosen_title = cluster_arts[0].get("title", "")
+
+        # 2. Core Category Tagging via Centroid vs CORE_CATEGORIES
+        if category_embs is not None and centroid_norm.shape[1] == category_embs.shape[1]:
+            cat_sims = (category_embs @ centroid_norm.T).flatten()
+            ranked_cats = sorted(range(len(CORE_CATEGORIES)), key=lambda j: float(cat_sims[j]), reverse=True)
+            top_score = float(cat_sims[ranked_cats[0]])
+
+            chosen_cats = []
+            for j in ranked_cats:
+                if len(chosen_cats) >= 3:
+                    break
+                if float(cat_sims[j]) >= 0.25 and (not chosen_cats or (top_score - float(cat_sims[j]) <= 0.07)):
+                    chosen_cats.append(CORE_CATEGORIES[j])
+                else:
+                    break
+            if not chosen_cats:
+                chosen_cats = [CORE_CATEGORIES[ranked_cats[0]]]
+        else:
+            chosen_cats = ["Διάφορα"]
+
+        # 3. Custom Tags via Named Entities from the chosen topic
+        custom_tags = []
+        if len(cluster_arts) > 1 and nlp is not None:
+            try:
+                doc = nlp(chosen_title)
+                seen_tags = set(chosen_cats)
+                for ent in doc.ents:
+                    ent_text = ent.text.strip()
+                    if (len(ent_text) > 3 
+                        and not ent_text.isdigit() 
+                        and ent_text not in seen_tags 
+                        and ent_text.lower() not in {"βίντεο", "εικόνες", "φωτογραφίες"}):
+                        custom_tags.append(ent_text)
+                        seen_tags.add(ent_text)
+                        if len(custom_tags) >= 2:
+                            break
+            except Exception:
+                pass
+
+        # Clean internal _emb before returning
+        for a in cluster_arts:
+            a.pop("_emb", None)
+
+        group_data = {
+            "topic": chosen_title,
+            "articles": cluster_arts,
+            "count": len(cluster_arts),
+            "core_tags": chosen_cats,
+            "custom_tags": custom_tags,
+            "tags": chosen_cats + custom_tags
+        }
+        processed_groups.append(group_data)
+
+    return processed_groups
+
+
 @app.post("/cluster")
 def cluster(data: dict):
     global fallback_used_globally
@@ -544,57 +748,12 @@ def cluster(data: dict):
 
     all_clusters = cluster_super_group(articles, precomputed_embeddings=precomputed) if articles else []
 
-    clusters_to_name = []
-    singletons = []
-    for cluster_arts in all_clusters:
-        cluster_arts.sort(key=lambda x: x.get("published_at", ""), reverse=True)
-        group_data = {
-            "topic": cluster_arts[0]["title"],
-            "articles": cluster_arts,
-            "count": len(cluster_arts),
-            "core_tags": [],
-            "custom_tags": [],
-            "tags": []
-        }
-        if len(cluster_arts) > 1:
-            clusters_to_name.append(group_data)
-        else:
-            singletons.append(group_data)
-
-    if COMMAND_CODE_API_KEY or GEMINI_API_KEY:
-        t_llm_start = time.time()
-        
-        async def fetch_all_ai_data():
-            async with httpx.AsyncClient() as client:
-                async def fetch_name(g):
-                    result = await call_naming(g["topic"], g["articles"], client)
-                    g["topic"] = result["topic"]
-                    g["core_tags"] = result.get("core_tags", ["Διάφορα"])
-                    g["custom_tags"] = result.get("custom_tags", [])
-                    g["tags"] = g["core_tags"] + g["custom_tags"]
-                
-                tasks = [fetch_name(g) for g in clusters_to_name]
-                
-                # Singletons categorization
-                if singletons:
-                    articles_for_batch = [s["articles"][0] for s in singletons]
-                    async def fetch_singletons():
-                        results = await call_batch_categorize(articles_for_batch, client)
-                        for i, s in enumerate(singletons):
-                            s["core_tags"] = results[i].get("core_tags", ["Διάφορα"])
-                            s["custom_tags"] = results[i].get("custom_tags", [])
-                            s["tags"] = s["core_tags"] + s["custom_tags"]
-                    tasks.append(fetch_singletons())
-                    
-                await asyncio.gather(*tasks)
-        
-        asyncio.run(fetch_all_ai_data())
-        print(f"Gemini processing took: {time.time() - t_llm_start:.2f}s")
+    t_proc_start = time.time()
+    all_groups = process_groups_embedding_only(all_clusters)
+    print(f"Local embedding naming and categorization took: {time.time() - t_proc_start:.2f}s for {len(all_groups)} groups")
 
     category_groups = defaultdict(list)
     total_articles = 0
-
-    all_groups = clusters_to_name + singletons
     
     # If API key is missing or failed, ensure fallback logic
     for group in all_groups:
