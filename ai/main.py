@@ -101,6 +101,114 @@ CORE_CATEGORY_DESCRIPTIONS = {
 }
 
 
+# --- CATEGORY RULE START -------------------------------------------------
+# Pure-python category decision rules (no model/network deps). Extracted and
+# exec'd verbatim by the offline calibration tooling, so keep this block
+# self-contained.
+#
+# Background: categories are assigned by cosine similarity between the article
+# text (or cluster centroid) and CORE_CATEGORY_DESCRIPTIONS. Those similarities
+# are compressed into a narrow band (~0.10-0.45), so a wide "within X of the
+# top" tolerance tags stories with categories that have nothing to do with
+# them (e.g. a measles story filed under "Καιρός"). The rules below constrain
+# that: a hard absolute floor, a tight delta band, an explicit unclassified
+# bucket instead of "best of a bad lot", and a lexical gate for weather.
+#
+# Calibration (live 544-group batch, Oct 2026): top-sim p10 = 0.21, median 0.34.
+# The old rule had NO floor in practice (it fell back to ranked[0]), which is how
+# "oil slick" (0.195) and "Man Utd" (0.208) were filed under Καιρός. A 0.25 floor
+# over-corrects: 23% of stories become Διάφορα, including clear sports/world
+# items ("UFC 333 …" lands there). 0.15 leaves ~5% unclassified — enough to
+# catch hopeless text while keeping a defensible best-guess label. The old 0.07
+# delta tagged 186 of 544 groups with 2-3 categories; 0.02 keeps near-ties only.
+
+import unicodedata
+
+
+def strip_accents(text):
+    """Strip diacritical marks (accents) from Greek text."""
+    nfkd = unicodedata.normalize('NFKD', text)
+    return ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
+
+
+SIM_THRESHOLD = 0.15      # min absolute score: the TOP category must clear it
+EXTRA_MIN_SCORE = 0.30    # 2nd/3rd category must ALSO clear this absolute floor
+EXTRA_MAX_DELTA = 0.02    # ... and sit within this of the top score
+MAX_CATEGORIES = 3
+UNCLASSIFIED = "Διάφορα"
+WEATHER_CATEGORY = "Καιρός"
+
+# Weather vocabulary, matched against accent-stripped lowercase text. Kept
+# deliberately concrete: generic words ("πρόγνωση") are excluded because they
+# collide with other domains (medical prognosis, poll forecasts).
+_WEATHER_RE = re.compile(
+    "|".join([
+        r"καιρ(?!ι)",        # καιρός/καιρού/καιρικά — not καιρία (crucial)
+        r"κακοκαιρ", r"μετεωρολ", r"μετεωρο",
+        r"βροχ", r"καταιγιδ", r"θυελλ", r"μποφορ", r"μελτεμ",
+        r"θερμοκρασ", r"καυσων", r"ζεστη", r"ψυχος", r"παγετ",
+        r"χιον", r"χαλαζ", r"υγρασι", r"ομιχλ", r"πλημμυρ",
+        r"\bweather\b", r"\bforecast\b", r"\bstorms?\b", r"\brain(fall|y|s)?\b",
+        r"\bsnow", r"heat\s?wave", r"\btemperatures?\b", r"\bwinds?\b",
+        r"\bgale\b", r"hurricane", r"typhoon", r"cyclone", r"\bfloods?\b",
+        r"blizzard", r"\bthunder", r"hailstorm", r"monsoon", r"frost",
+    ]),
+    re.IGNORECASE,
+)
+
+
+def has_weather_evidence(text, topic="") -> bool:
+    """True only when the story is actually about weather.
+
+    A weather word in the headline is enough; otherwise the body needs at least
+    two hits, so passing mentions ("ο καιρός είναι ακόμα ζεστός" in a celebrity
+    piece, "snow" in a ski-resort feature) do not qualify.
+    """
+    if topic and _WEATHER_RE.search(strip_accents(str(topic)).lower()):
+        return True
+    if not text:
+        return False
+    return len(_WEATHER_RE.findall(strip_accents(str(text)).lower())) >= 2
+
+
+def choose_categories(cat_names, sims, evidence_text, topic=""):
+    """Turn a similarity vector into a small, defensible set of categories.
+
+    1. The top category must clear SIM_THRESHOLD; otherwise the item is
+       UNCLASSIFIED (never "whatever scored highest").
+    2. Extra categories (up to MAX_CATEGORIES total) must clear
+       EXTRA_MIN_SCORE *and* be within EXTRA_MAX_DELTA of the top score.
+    3. "Καιρός" is masked out unless the text has real weather vocabulary —
+       the embedding alone cannot tell "οσμή/μεθάνιο" from "βροχές".
+    4. UNCLASSIFIED never rides along as a co-tag when a real category won.
+    """
+    scores = [float(s) for s in sims]
+    if not has_weather_evidence(evidence_text, topic):
+        scores = [(-1.0 if c == WEATHER_CATEGORY else s)
+                  for c, s in zip(cat_names, scores)]
+
+    ranked = sorted(range(len(cat_names)), key=lambda j: scores[j], reverse=True)
+    top = scores[ranked[0]]
+    if top < SIM_THRESHOLD:
+        return [UNCLASSIFIED]
+
+    chosen = [cat_names[ranked[0]]]
+    for j in ranked[1:]:
+        if len(chosen) >= MAX_CATEGORIES:
+            break
+        if scores[j] >= EXTRA_MIN_SCORE and (top - scores[j]) <= EXTRA_MAX_DELTA:
+            chosen.append(cat_names[j])
+        else:
+            break
+
+    if len(chosen) > 1 and UNCLASSIFIED in chosen:
+        chosen = [c for c in chosen if c != UNCLASSIFIED]
+    return chosen or [UNCLASSIFIED]
+
+
+# --- CATEGORY RULE END ---------------------------------------------------
+
+
 def local_categorize_singletons(articles):
     """Categorize singleton articles locally using embedding similarity to
     category descriptions. No LLM calls. Returns list of dicts with
@@ -126,30 +234,12 @@ def local_categorize_singletons(articles):
     norms = np.linalg.norm(art_embs, axis=1, keepdims=True)
     art_embs = art_embs / np.where(norms == 0, 1e-12, norms)
 
-    SIM_THRESHOLD = 0.25
     results = []
     for i in range(len(articles)):
         sims = category_embs @ art_embs[i]
-        ranked = sorted(range(len(cat_names)), key=lambda j: float(sims[j]), reverse=True)
-        top_score = float(sims[ranked[0]])
-        chosen = []
-        for j in ranked:
-            if len(chosen) >= 3:
-                break
-            if float(sims[j]) >= SIM_THRESHOLD and (not chosen or (top_score - float(sims[j]) <= 0.07)):
-                chosen.append(cat_names[j])
-            else:
-                break
-        if not chosen:
-            chosen = [cat_names[ranked[0]]]
-        # Deduplicate
-        seen = set()
-        uniq = []
-        for c in chosen:
-            if c not in seen:
-                seen.add(c)
-                uniq.append(c)
-        results.append({"core_tags": uniq, "custom_tags": []})
+        chosen = choose_categories(cat_names, sims, art_texts[i],
+                                   articles[i].get("title", ""))
+        results.append({"core_tags": chosen, "custom_tags": []})
     return results
 
 
@@ -615,13 +705,6 @@ def embed_articles(data: dict):
             
     return {"embeddings": embeddings_dict}
 
-import unicodedata
-
-def strip_accents(text):
-    """Strip diacritical marks (accents) from Greek text."""
-    nfkd = unicodedata.normalize('NFD', text)
-    return ''.join(c for c in nfkd if unicodedata.category(c) != 'Mn')
-
 @app.post("/search-embed")
 def search_embed(data: dict):
     query = data.get("query", "")
@@ -678,21 +761,15 @@ def process_groups_embedding_only(all_clusters):
         # 2. Core Category Tagging via Centroid vs CORE_CATEGORIES
         if category_embs is not None and centroid_norm.shape[1] == category_embs.shape[1]:
             cat_sims = (category_embs @ centroid_norm.T).flatten()
-            ranked_cats = sorted(range(len(CORE_CATEGORIES)), key=lambda j: float(cat_sims[j]), reverse=True)
-            top_score = float(cat_sims[ranked_cats[0]])
-
-            chosen_cats = []
-            for j in ranked_cats:
-                if len(chosen_cats) >= 3:
-                    break
-                if float(cat_sims[j]) >= 0.25 and (not chosen_cats or (top_score - float(cat_sims[j]) <= 0.07)):
-                    chosen_cats.append(CORE_CATEGORIES[j])
-                else:
-                    break
-            if not chosen_cats:
-                chosen_cats = [CORE_CATEGORIES[ranked_cats[0]]]
+            # Evidence text for the lexical gates: every headline in the
+            # cluster plus the opening words of each article.
+            evidence = " ".join(
+                f"{a.get('title', '')} {' '.join(extract_text(a.get('content', '')).split()[:30])}"
+                for a in cluster_arts[:6]
+            )
+            chosen_cats = choose_categories(CORE_CATEGORIES, cat_sims, evidence, chosen_title)
         else:
-            chosen_cats = ["Διάφορα"]
+            chosen_cats = [UNCLASSIFIED]
 
         # 3. Custom Tags via Named Entities from the chosen topic
         custom_tags = []

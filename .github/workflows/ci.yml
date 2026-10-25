@@ -38,3 +38,6 @@ jobs:
 
       - name: Compile-check AI service sources
         run: python -m compileall ai/*.py
+
+      - name: Category decision rules (unit tests)
+        run: python -m unittest ai.test_categorization -v
