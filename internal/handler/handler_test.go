@@ -115,3 +115,88 @@ func TestGzipMiddleware(t *testing.T) {
 		t.Fatal("expected plain body for non-gzip client")
 	}
 }
+
+func TestFlatToAI_MultipleGroupsPerCategory(t *testing.T) {
+	dd := &models.DashboardData{
+		Categories: []models.CategoryGroup{
+			{
+				Category: "Ελλάδα",
+				Articles: []models.Article{
+					{Title: "Φωτιά στην Αττική", Feed: "iefimerida"},
+					{Title: "Φωτιά κοντά στην Αταλάντη", Feed: "newsit"}, // same story different feed
+					{Title: "Αναβάθμιση οδικού δικτύου", Feed: "naftemporiki"},
+				},
+				Count: 3,
+			},
+		},
+		Total:     3,
+		Generated: "14:30:00",
+	}
+
+	result := FlatToAI(dd)
+	if result.Total != 3 {
+		t.Errorf("expected total 3, got %d", result.Total)
+	}
+	if len(result.Categories) != 1 {
+		t.Fatalf("expected 1 category, got %d", len(result.Categories))
+	}
+	if result.Categories[0].Category != "Ελλάδα" {
+		t.Errorf("expected category 'Ελλάδα', got %q", result.Categories[0].Category)
+	}
+	// Each article becomes its own group in FlatToAI
+	if len(result.Categories[0].Groups) != 3 {
+		t.Errorf("expected 3 groups, got %d", len(result.Categories[0].Groups))
+	}
+}
+
+func TestFlatToAI_PreservesArticleData(t *testing.T) {
+	art := models.Article{
+		ID:    12345,
+		Title: "Marfin: Προθεσμία για να απολογηθεί την Τρίτη",
+		URL:   "https://example.com/marfin",
+		Feed:  "The Press Project",
+	}
+	dd := &models.DashboardData{
+		Categories: []models.CategoryGroup{
+			{Category: "Ελλάδα", Articles: []models.Article{art}, Count: 1},
+		},
+		Total:     1,
+		Generated: "12:00:00",
+	}
+
+	result := FlatToAI(dd)
+	if len(result.Categories[0].Groups) != 1 {
+		t.Fatalf("expected 1 group")
+	}
+	if result.Categories[0].Groups[0].Articles[0].ID != 12345 {
+		t.Errorf("expected article ID 12345")
+	}
+	if result.Categories[0].Groups[0].Articles[0].URL != "https://example.com/marfin" {
+		t.Errorf("expected article URL preserved")
+	}
+}
+
+func TestFlatToAI_MusicCategory(t *testing.T) {
+	dd := &models.DashboardData{
+		Categories: []models.CategoryGroup{
+			{
+				Category: "Μουσικά νέα",
+				Articles: []models.Article{
+					{Title: "Λένα Ζευγαρά: Κυκλοφόρησε το νέο διπλό album", Feed: "Gazzetta"},
+				},
+				Count: 1,
+			},
+		},
+		Total:     1,
+		Generated: "10:00:00",
+	}
+
+	result := FlatToAI(dd)
+	if len(result.Categories) != 1 {
+		t.Fatalf("expected 1 category")
+	}
+	// Should preserve the category name as-is
+	if result.Categories[0].Category != "Μουσικά νέα" {
+		t.Errorf("expected 'Μουσικά νέα', got %q", result.Categories[0].Category)
+	}
+}
