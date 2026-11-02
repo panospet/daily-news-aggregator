@@ -29,10 +29,14 @@ def _load_rules():
 RULES = _load_rules()
 choose_categories = RULES["choose_categories"]
 has_weather_evidence = RULES["has_weather_evidence"]
+has_music_evidence = RULES["has_music_evidence"]
+has_release_evidence = RULES["has_release_evidence"]
 UNCLASSIFIED = RULES["UNCLASSIFIED"]
 WEATHER = RULES["WEATHER_CATEGORY"]
+MUSIC = RULES["MUSIC_CATEGORY"]
+RELEASE = RULES["RELEASE_CATEGORY"]
 
-CATS = ["Ελλάδα", "Κοινωνία", "Καιρός", UNCLASSIFIED]
+CATS = ["Ελλάδα", "Κοινωνία", "Καιρός", "Οικονομία & Ενέργεια", MUSIC, RELEASE, UNCLASSIFIED]
 
 
 class WeatherGateTest(unittest.TestCase):
@@ -108,6 +112,101 @@ class ChooseCategoriesTest(unittest.TestCase):
         out = choose_categories(CATS, sims, "ισχυρές βροχές και καταιγίδες· σχολεία κλειστά")
         self.assertLessEqual(len(out), 3)
         self.assertIn(WEATHER, out)
+
+    def test_music_masked_without_evidence_and_feed(self):
+        """Articles with high release similarity (like cars or deals) must not get music categories."""
+        # Simulated similarity where RELEASE won because of 'νέα έκδοση / new edition'
+        sims = self._sims({RELEASE: 0.285, MUSIC: 0.15, "Οικονομία & Ενέργεια": 0.22})
+        out = choose_categories(
+            CATS, sims,
+            "Opel Corsa: Με turbo κινητήρα 100 ίππων και τιμή από 17.300 ευρώ",
+            "Opel Corsa",
+            feed_cats=["news"]
+        )
+        self.assertNotIn(RELEASE, out)
+        self.assertNotIn(MUSIC, out)
+        self.assertEqual(out, ["Οικονομία & Ενέργεια"])
+
+    def test_music_news_without_release_gets_music_only(self):
+        """Tour and concert news must not get tagged as music releases."""
+        sims = self._sims({RELEASE: 0.38, MUSIC: 0.37})
+        out = choose_categories(
+            CATS, sims,
+            "Deep Purple: Ακυρώθηκαν συναυλίες τους, λόγω ασθένειας του Ίαν Γκίλαν",
+            "Deep Purple συναυλίες",
+            feed_cats=["news"]
+        )
+        self.assertNotIn(RELEASE, out)
+        self.assertIn(MUSIC, out)
+
+    def test_true_release_gets_release_category(self):
+        """Actual album/single releases must be tagged as releases."""
+        sims = self._sims({RELEASE: 0.38, MUSIC: 0.37})
+        out = choose_categories(
+            CATS, sims,
+            "Λένα Ζευγαρά: Κυκλοφόρησε το νέο διπλό album «Μείνε Απόψε Εδώ»",
+            "Λένα Ζευγαρά νέο album",
+            feed_cats=["sports"]
+        )
+        self.assertIn(RELEASE, out)
+
+
+class MusicGateTest(unittest.TestCase):
+    def test_unrelated_articles_from_screenshot_fail(self):
+        """Articles from the user screenshot must fail the music evidence test."""
+        unrelated = [
+            ("Black Friday 2026: Πότε αρχίζουν οι πρώτες εκπτώσεις και πόσο θα κρατήσουν", ["news"]),
+            ("Ποιες Κυριακές θα είναι ανοιχτά μαγαζιά και καταστήματα μέχρι το τέλος του 2026", ["news"]),
+            ("Opel Corsa: Με turbo κινητήρα 100 ίππων και τιμή από 17.300 ευρώ", ["news"]),
+            ("Ράλι $1 τρισ. για Apple από τον Ιούνιο", ["news"]),
+            ("Η Estée Lauder κερδίζει τους καταναλωτές και αναβαθμίζει τις προβλέψεις", ["news"]),
+            ("Συνταγή: Ομελέτα με ντομάτες και χούμους", ["news"]),
+            ("Starwatch: Catch the striking trifecta of Venus, the moon and Spica at break of dawn", ["international"]),
+            ("Κάμπινγκ: Το παρελθόν έρχεται ξανά στο προσκήνιο", ["news"]),
+            ("Πωλήσεις αυτοκινήτων Οκτωβρίου: Ρεκόρ ταξινομήσεων για την αγορά", ["news"]),
+            ("Θάντερ: Δεν ενεργοποίησαν την οψιόν ανανέωσης του Τόπιτς", ["sports"]),
+            ("Hoka Rincon 5 Παπούτσια για Τρέξιμο με 92€ από epapoutsia", ["random"]),
+            ("Poco X8 Pro Max 12GB 256GB orange", ["random"]),
+            ("Ψησταριά υγραερίου Jamestown Marlon 4.3 με μαντέμι – 399€", ["random"]),
+        ]
+        for title, cats in unrelated:
+            self.assertFalse(has_music_evidence(title, title, feed_cats=cats), f"Failed for {title}")
+
+    def test_genuine_music_articles_pass(self):
+        valid = [
+            ("Deep Purple: Ακυρώθηκαν συναυλίες τους, λόγω ασθένειας του Ίαν Γκίλαν", ["news"]),
+            ("Το τραγούδι της ημέρας: Polis", ["news"]),
+            ("«Days Reflected in Melodies»: Ένα alternative hip hop album από νέους δημιουργούς", ["news"]),
+            ("Steve Ellis, frontman of Everlasting Love hitmakers Love Affair, dies aged 76", ["international"]),
+            ("Robert Plant and Saving Grace announce Summer 2027 dates", ["music"]),
+        ]
+        for title, cats in valid:
+            self.assertTrue(has_music_evidence(title, title, feed_cats=cats), f"Failed for {title}")
+
+
+class ReleaseGateTest(unittest.TestCase):
+    def test_non_release_music_fails(self):
+        non_releases = [
+            ("Robert Plant and Saving Grace announce Summer 2027 dates", ["music"], ["UNCUT"]),
+            ("Deep Purple: Ακυρώθηκαν συναυλίες τους, λόγω ασθένειας του Ίαν Γκίλαν", ["news"], ["in.gr"]),
+            ("Steve Ellis, frontman of Everlasting Love hitmakers Love Affair, dies aged 76", ["international"], ["The Guardian"]),
+            ("Mighty Hoopla celebrates 10th anniversary with huge 2027 line-up", ["music"], ["NME"]),
+        ]
+        for title, cats, feeds in non_releases:
+            self.assertFalse(has_release_evidence(title, title, feed_cats=cats, feed_names=feeds), f"Failed for {title}")
+
+    def test_true_releases_pass(self):
+        releases = [
+            ("Bonnie Tyler Christmas single to be released as husband says he misses her every day", ["international"], ["BBC News"]),
+            ("Λένα Ζευγαρά: Κυκλοφόρησε το νέο διπλό album «Μείνε Απόψε Εδώ»", ["sports"], ["Gazzetta RSS"]),
+            ("«Days Reflected in Melodies»: Ένα alternative hip hop album από νέους δημιουργούς", ["news"], ["in.gr"]),
+            ("Το τραγούδι της ημέρας: Polis", ["news"], ["Η Εφημερίδα των Συντακτών"]),
+            ("My Chemical Romance confirm they'll begin work on new album in 2027", ["music"], ["Louder RSS Feed"]),
+            ("Jaberdarwin - The Soft Collapse", ["music"], ["Rocking.gr feed"]),
+            ("Late Loop", ["music"], ["Pitchfork"]),
+        ]
+        for title, cats, feeds in releases:
+            self.assertTrue(has_release_evidence(title, title, feed_cats=cats, feed_names=feeds), f"Failed for {title}")
 
 
 if __name__ == "__main__":

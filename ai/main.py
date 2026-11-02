@@ -81,22 +81,22 @@ CORE_CATEGORIES = [
 # Human-readable descriptions for each core category, used for
 # embedding-based (local, no-LLM) zero-shot categorization of singleton articles.
 CORE_CATEGORY_DESCRIPTIONS = {
-    "Ελλάδα": "Ελληνικές ειδήσεις, Ελλάδα, εγχώρια γεγονότα και νέα",
-    "Κόσμος": "Διεθνείς ειδήσεις, κόσμος, εξωτερική πολιτική",
-    "Πολιτική & Διπλωματία": "Πολιτική, κυβέρνηση, βουλή, διπλωματία, εκλογές",
-    "Οικονομία & Ενέργεια": "Οικονομία, αγορές, ενέργεια, επιχειρήσεις, χρηματιστήριο",
-    "Κοινωνία": "Κοινωνία, κοινωνικά ζητήματα, εκπαίδευση, υγεία, μετανάστευση",
-    "Έγκλημα & Αστυνομικό": "Έγκλημα, αστυνομία, δικαιοσύνη, δίκες, συλλήψεις",
-    "Περιβάλλον & Φυσικές Καταστροφές": "Περιβάλλον, κλίμα, φυσικές καταστροφές, πυρκαγιές, σεισμοί, πλημμύρες",
-    "Πόλεμος & Συγκρούσεις": "Πόλεμος, συγκρούσεις, στρατός, γεωπολιτική, τρομοκρατία",
-    "Αθλητισμός": "Αθλητισμός, ποδόσφαιρο, μπάσκετ, αγώνες, πρωταθλήματα",
-    "Πολιτισμός & Showbiz": "Πολιτισμός, κινηματογράφος, τηλεόραση, celebrities, showbiz, τέχνη",
-    "Καιρός": "Καιρός, πρόγνωση, θερμοκρασίες, βροχές, καύσωνας",
-    "Τεχνολογία & Επιστήμη": "Τεχνολογία, επιστήμη, AI, gadgets, διαστήματα",
-    "Lifestyle & Περίεργα": "Lifestyle, περίεργα, διατροφή, ταξίδια, υγεία και ευεξία",
-    "Μουσική": "Μουσική, συναυλίες, καλλιτέχνες, φεστιβάλ",
-    "Νέες Κυκλοφορίες (Μουσική)": "Νέες μουσικές κυκλοφορίες, νέα τραγούδια, νέα άλμπουμ, single release, νέο single",
-    "Άρθρα Γνώμης": "Άρθρα γνώμης, σχόλια, αναλύσεις, editorial, απόψεις",
+    "Ελλάδα": "Ελληνικές ειδήσεις, Ελλάδα, εγχώρια επικαιρότητα, γεγονότα, τοπική αυτοδιοίκηση",
+    "Κόσμος": "Διεθνείς ειδήσεις, κόσμος, εξωτερική πολιτική, διεθνή γεγονότα",
+    "Πολιτική & Διπλωματία": "Πολιτική, κυβέρνηση, βουλή, κόμματα, υπουργοί, διπλωματία, εκλογές",
+    "Οικονομία & Ενέργεια": "Οικονομία, αγορές, επιχειρήσεις, χρηματιστήριο, τράπεζες, ενέργεια, τιμές, εμπόριο, καταναλωτές, αυτοκίνητα, πωλήσεις",
+    "Κοινωνία": "Κοινωνία, κοινωνικά ζητήματα, εκπαίδευση, υγεία, νοσοκομεία, εργασία, μετανάστευση",
+    "Έγκλημα & Αστυνομικό": "Έγκλημα, αστυνομία, δικαιοσύνη, δίκες, συλλήψεις, δικαστήρια, παραβατικότητα",
+    "Περιβάλλον & Φυσικές Καταστροφές": "Περιβάλλον, κλίμα, φυσικές καταστροφές, πυρκαγιές, σεισμοί, πλημμύρες, οικολογία",
+    "Πόλεμος & Συγκρούσεις": "Πόλεμος, στρατός, μάχες, επιθέσεις, γεωπολιτική, τρομοκρατία, όπλα",
+    "Αθλητισμός": "Αθλητισμός, ποδόσφαιρο, μπάσκετ, NBA, Euroleague, αγώνες, πρωταθλήματα, μεταγραφές, ομάδες, παίκτες",
+    "Πολιτισμός & Showbiz": "Πολιτισμός, θέατρο, σινεμά, κινηματογράφος, τηλεόραση, ηθοποιοί, σειρές, showbiz, celebrities",
+    "Καιρός": "Καιρός, πρόγνωση, θερμοκρασίες, βροχές, καταιγίδες, καύσωνας, χιόνια, μποφόρ",
+    "Τεχνολογία & Επιστήμη": "Τεχνολογία, επιστήμη, AI, υπολογιστές, smartphones, διαδίκτυο, gadgets, διάστημα, αστρονομία, video games",
+    "Lifestyle & Περίεργα": "Lifestyle, διατροφή, συνταγές, μαγειρική, μόδα, ταξίδια, ευεξία, ομορφιά, περίεργα, προσφορές αγορών",
+    "Μουσική": "Μουσική, συναυλίες, καλλιτέχνες, συγκροτήματα, περιοδείες, φεστιβάλ, setlist, rock, pop, metal",
+    "Νέες Κυκλοφορίες (Μουσική)": "Νέες μουσικές κυκλοφορίες, νέα τραγούδια, νέα άλμπουμ, single release, new song, new album, videoclip, νέο single",
+    "Άρθρα Γνώμης": "Άρθρα γνώμης, σχόλια, αναλύσεις, editorial, απόψεις, στήλες",
     "Διάφορα": "Διάφορα, γενικά θέματα",
 }
 
@@ -137,6 +137,8 @@ EXTRA_MAX_DELTA = 0.02    # ... and sit within this of the top score
 MAX_CATEGORIES = 3
 UNCLASSIFIED = "Διάφορα"
 WEATHER_CATEGORY = "Καιρός"
+MUSIC_CATEGORY = "Μουσική"
+RELEASE_CATEGORY = "Νέες Κυκλοφορίες (Μουσική)"
 
 # Weather vocabulary, matched against accent-stripped lowercase text. Kept
 # deliberately concrete: generic words ("πρόγνωση") are excluded because they
@@ -156,6 +158,55 @@ _WEATHER_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Music vocabulary, matched against accent-stripped lowercase text.
+_MUSIC_RE = re.compile(
+    "|".join([
+        r"τραγουδ", r"μουσικ", r"δισκο", r"δισκου", r"δισκογραφ", r"αλμπουμ",
+        r"συναυλι", r"τραγουδιστ", r"τραγουδοποι", r"συνθετ", r"στιχουργ",
+        r"ρεσιταλ", r"συγκροτημ", r"μπαντα", r"βιντεοκλιπ", r"πενταγραμμ",
+        r"ορχηστρ", r"κιθαρ", r"πιανο", r"μελωδι", r"soundtrack",
+        r"\bmusic\b", r"\bmusical\b", r"\bsongs?\b", r"\balbums?\b", r"\btracks?\b",
+        r"\bsingles?\b", r"\bconcerts?\b", r"\btours?\b", r"\bgigs?\b",
+        r"\bband\b", r"\bbands\b", r"\bfrontman\b", r"\bvocalist\b",
+        r"\bguitarist\b", r"\bdrummer\b", r"\bbassist\b", r"\bsetlist\b",
+        r"\bdiscography\b", r"\bep\b", r"\blp\b", r"\bvinyl\b", r"\bplaylist\b",
+        r"\bhitmakers?\b", r"\bfrontwoman\b",
+    ]),
+    re.IGNORECASE,
+)
+
+# Release vocabulary for music releases.
+_EXPLICIT_RELEASE_RE = re.compile(
+    "|".join([
+        r"νεο τραγουδι", r"νεο αλμπουμ", r"νεο album", r"νεος δισκος", r"νεου δισκου", r"νεο single",
+        r"νεο track", r"νεο ep", r"νεο cd", r"νεο lp", r"νεο hit", r"νεο του hit",
+        r"νεο της hit", r"κυκλοφορησε", r"κυκλοφορει", r"κυκλοφορια", r"βιντεοκλιπ",
+        r"βιντεο κλιπ", r"video clip", r"πρεμιερα", r"τραγουδι της ημερας",
+        r"νεα κυκλοφορια", r"πρωτη ακροαση", r"ακουστε το", r"ακουστε εδω",
+        r"\bnew album\b", r"\bnew single\b", r"\bnew song\b", r"\bnew track\b",
+        r"\bnew ep\b", r"\bnew lp\b", r"\bnew video\b", r"\bmusic video\b",
+        r"\breleases?\b", r"\breleased\b", r"\bdrops?\b", r"\bdropped\b",
+        r"\bout now\b", r"\balbum review\b", r"\btrack review\b", r"\bsingle review\b",
+        r"\bpremiere\b", r"\bstream new\b", r"\blisten to\b", r"\bunveils new\b",
+        r"\bshares new\b", r"\bshares video\b", r"\bshares cover\b", r"\bcovered\b",
+        r"\bfirst listen\b",
+    ]),
+    re.IGNORECASE,
+)
+
+_BROAD_RELEASE_RE = re.compile(
+    r"\b(?:new|debut|double|first|solo|studio|live|hip hop|rock|pop|metal|rap|folk|jazz)?\s*albums?\b"
+    r"|\b(?:new|debut|first)?\s*singles?\b"
+    r"|αλμπουμ|δισκο[ςυ]|single",
+    re.IGNORECASE,
+)
+
+_NON_RELEASE_RE = re.compile(
+    r"\b(?:\d+-album|best \d+|tour|dates|concert|festival|setlist|tickets|cancelled|postponed|dies|passed away|anniversary)\b"
+    r"|συναυλι|περιοδει|εισιτηρι|ακυρωθηκ|πεθανε|επετειο",
+    re.IGNORECASE,
+)
+
 
 def has_weather_evidence(text, topic="") -> bool:
     """True only when the story is actually about weather.
@@ -171,21 +222,83 @@ def has_weather_evidence(text, topic="") -> bool:
     return len(_WEATHER_RE.findall(strip_accents(str(text)).lower())) >= 2
 
 
-def choose_categories(cat_names, sims, evidence_text, topic=""):
+def has_music_evidence(text, topic="", feed_cats=None) -> bool:
+    """True only when the story is actually related to music.
+
+    Stories from a feed with Miniflux category 'music' qualify automatically.
+    Deals/coupons ('random') are explicitly disqualified. Otherwise, genuine
+    music terms must appear in the topic or body text.
+    """
+    if feed_cats:
+        clean_cats = [str(c).lower() for c in feed_cats]
+        if "random" in clean_cats:
+            return False
+        if "music" in clean_cats:
+            return True
+    combo = f"{topic or ''} {text or ''}"
+    return bool(_MUSIC_RE.search(strip_accents(combo).lower()))
+
+
+def has_release_evidence(text, topic="", feed_cats=None, feed_names=None) -> bool:
+    """True only when the story is about a music release (single, album, EP, video).
+
+    Requires music evidence first. Then checks for release vocabulary or
+    review/release naming patterns in dedicated music publication feeds.
+    """
+    if not has_music_evidence(text, topic, feed_cats):
+        return False
+    combo = f"{topic or ''} {text or ''}"
+    stripped = strip_accents(combo).lower()
+    if _EXPLICIT_RELEASE_RE.search(stripped):
+        return True
+    if _BROAD_RELEASE_RE.search(stripped) and not _NON_RELEASE_RE.search(stripped):
+        return True
+    if feed_names:
+        for fn in feed_names:
+            fn_l = str(fn).lower()
+            if any(x in fn_l for x in ["pitchfork", "rocking.gr"]):
+                if " - " in (topic or "") or "review" in stripped:
+                    return True
+                if "pitchfork" in fn_l:
+                    return True
+    return False
+
+
+def choose_categories(cat_names, sims, evidence_text, topic="", feed_cats=None, feed_names=None):
     """Turn a similarity vector into a small, defensible set of categories.
 
     1. The top category must clear SIM_THRESHOLD; otherwise the item is
        UNCLASSIFIED (never "whatever scored highest").
     2. Extra categories (up to MAX_CATEGORIES total) must clear
        EXTRA_MIN_SCORE *and* be within EXTRA_MAX_DELTA of the top score.
-    3. "Καιρός" is masked out unless the text has real weather vocabulary —
-       the embedding alone cannot tell "οσμή/μεθάνιο" from "βροχές".
-    4. UNCLASSIFIED never rides along as a co-tag when a real category won.
+    3. "Καιρός" is masked out unless the text has real weather vocabulary.
+    4. "Μουσική" and "Νέες Κυκλοφορίες (Μουσική)" are masked out unless the
+       text has genuine music vocabulary or belongs to a music feed.
+    5. "Νέες Κυκλοφορίες (Μουσική)" is additionally masked out unless release
+       evidence is present.
+    6. UNCLASSIFIED never rides along as a co-tag when a real category won.
     """
     scores = [float(s) for s in sims]
     if not has_weather_evidence(evidence_text, topic):
         scores = [(-1.0 if c == WEATHER_CATEGORY else s)
                   for c, s in zip(cat_names, scores)]
+
+    has_music = has_music_evidence(evidence_text, topic, feed_cats)
+    if not has_music:
+        scores = [(-1.0 if c in (MUSIC_CATEGORY, RELEASE_CATEGORY) else s)
+                  for c, s in zip(cat_names, scores)]
+    else:
+        # Boost music categories if the article comes from a music feed
+        if feed_cats and any(str(c).lower() == "music" for c in feed_cats):
+            scores = [(s + 0.15 if c in (MUSIC_CATEGORY, RELEASE_CATEGORY) else s)
+                      for c, s in zip(cat_names, scores)]
+        has_release = has_release_evidence(evidence_text, topic, feed_cats, feed_names)
+        if not has_release:
+            scores = [(-1.0 if c == RELEASE_CATEGORY else s)
+                      for c, s in zip(cat_names, scores)]
+        else:
+            scores = [(s + 0.02 if c == RELEASE_CATEGORY else s)
+                      for c, s in zip(cat_names, scores)]
 
     ranked = sorted(range(len(cat_names)), key=lambda j: scores[j], reverse=True)
     top = scores[ranked[0]]
@@ -237,8 +350,14 @@ def local_categorize_singletons(articles):
     results = []
     for i in range(len(articles)):
         sims = category_embs @ art_embs[i]
+        feed_cat = articles[i].get("category", "")
+        feed_name = articles[i].get("feed", "")
+        feed_cats = [feed_cat] if feed_cat else None
+        feed_names = [feed_name] if feed_name else None
         chosen = choose_categories(cat_names, sims, art_texts[i],
-                                   articles[i].get("title", ""))
+                                   articles[i].get("title", ""),
+                                   feed_cats=feed_cats,
+                                   feed_names=feed_names)
         results.append({"core_tags": chosen, "custom_tags": []})
     return results
 
@@ -767,7 +886,10 @@ def process_groups_embedding_only(all_clusters):
                 f"{a.get('title', '')} {' '.join(extract_text(a.get('content', '')).split()[:30])}"
                 for a in cluster_arts[:6]
             )
-            chosen_cats = choose_categories(CORE_CATEGORIES, cat_sims, evidence, chosen_title)
+            feed_cats = [a.get("category", "") for a in cluster_arts if a.get("category")]
+            feed_names = [a.get("feed", "") for a in cluster_arts if a.get("feed")]
+            chosen_cats = choose_categories(CORE_CATEGORIES, cat_sims, evidence, chosen_title,
+                                            feed_cats=feed_cats, feed_names=feed_names)
         else:
             chosen_cats = [UNCLASSIFIED]
 
