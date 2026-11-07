@@ -13,12 +13,12 @@ browser ──▶ cloudflared tunnel (newspaper.panos.pet)
                 ▼
         kalodio :8280  ◀──reads──▶ redis :6379 (ai_cache, db 0)
                 │
-                └─POST /summarize (basic-auth proxy)──▶ dashboard :8081 ──▶ Gemini
+                └─POST /summarize (basic-auth proxy)──▶ dashboard :8080 ──▶ Gemini
 ```
 
 - **Reads, never writes**: Kalodio consumes the `ai_cache` Redis key that the
   Go backend maintains. It has no DB credentials.
-- **Summaries are proxied**: `POST /api/summary` → upstream `dashboard:8081`
+- **Summaries are proxied**: `POST /api/summary` → upstream `dashboard:8080`
   `/summarize` with basic auth (creds auto-read from repo `.env`), response is
   stripped to plain text before it reaches the browser.
 - **No third-party deps** — pure Python 3 stdlib (http.server + a minimal RESP

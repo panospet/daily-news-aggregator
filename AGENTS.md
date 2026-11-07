@@ -19,9 +19,8 @@ A self-hosted news aggregation stack:
 
 | Port | Service | Auth | Notes |
 |------|---------|------|-------|
-| 8280 | kalodio (official frontend) | none (tailnet/tunnel only) | newspaper UI |
-| 8080 | socat forward → 8280 | none | what the Cloudflare tunnel targets |
-| 8081 | legacy HTMX dashboard | basic auth | still fully functional |
+| 8080 | Go dashboard (HTMX + JSON APIs) | basic auth | main server |
+| 8280 | kalodio (newspaper frontend) | none (tailnet/tunnel only) | run manually; not in compose |
 | 8001 | Python AI service | internal | clustering/embeddings |
 | 6379 | Redis (bind 127.0.0.1) | none local | ai_cache lives here |
 

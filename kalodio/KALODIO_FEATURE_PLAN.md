@@ -1,7 +1,7 @@
 # Kalodio — Missing Features Plan
 
 > **Status:** Planning only. No code below has been implemented.
-> **Scope:** Features present in the legacy HTMX dashboard (`daily-news-aggregator`, `:8081`)
+> **Scope:** Features present in the legacy HTMX dashboard (`daily-news-aggregator`, `:8080`)
 > that are **not** present in the current Kalodio frontend (`kalodio/kalodio.py`, `:8280`),
 > which serves `newspaper.panos.pet`.
 > **Audience:** A future maintainer who will implement these without touching the Go backend.
