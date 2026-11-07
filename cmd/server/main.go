@@ -105,6 +105,8 @@ func main() {
 
 	aiCache := cache.NewAICache(redisClient, 60*time.Minute)
 
+	newsBlock := cache.NewNewsBlockStore(redisClient, time.Duration(cfg.BriefingNewsBlockTTLHours)*time.Hour)
+
 	srv := &handler.Server{
 		Cfg:        cfg,
 		DB:         db,
@@ -112,6 +114,7 @@ func main() {
 		Cache:      cache.NewArticleCache(redisClient, 2*time.Minute),
 		AICache:      aiCache,
 		SummaryCache: cache.NewSummaryCache(redisClient, 60*time.Minute),
+		NewsBlock:    newsBlock,
 		GroupMap:   groupMap,
 		Summarizer: summarizeSvc,
 		FetchFn:    fetchFn,
@@ -138,6 +141,10 @@ func main() {
 	// (or an external watchdog) opening a page. The 90s delay lets the AI
 	// service finish loading fastembed/spaCy before the first clustering call.
 	aiCache.StartBackgroundRefresh(ctx, db, fetchFn, 90*time.Second)
+
+	// Pre-generate the audio-briefing news blocks on schedule (see
+	// BRIEFING_NEWS_PLAN.md). Idempotent; a restart re-checks the stored block.
+	srv.StartBriefingPregen(ctx)
 
 	go func() {
 		log.Printf("🤖 Miniflux AI Dashboard starting on http://localhost%s", addr)

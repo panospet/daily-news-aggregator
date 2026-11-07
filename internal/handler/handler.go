@@ -32,6 +32,7 @@ type Server struct {
 	GroupMap   *cache.GroupMapping
 	Summarizer   *summarize.Service
 	SummaryCache *cache.SummaryCache
+	NewsBlock    *cache.NewsBlockStore
 	FetchFn      func(db *sql.DB) (*models.AIDashboardData, error)
 	RetryFn    func(hours int) (*models.DashboardData, error)
 	Repo       *database.Repository
@@ -93,6 +94,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /summarize-article", s.HandleSummarizeArticle)
 	mux.HandleFunc("POST /feedback", s.HandleFeedback)
 	mux.HandleFunc("POST /feedback/positive", s.HandlePositiveFeedback)
+	mux.HandleFunc("GET /api/briefing-news", s.HandleBriefingNews)
+	mux.HandleFunc("POST /api/briefing-news/generate", s.HandleBriefingNewsGenerate)
 }
 
 // Cards serves paginated cards for infinite scroll, either per category
