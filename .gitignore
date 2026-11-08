@@ -3,7 +3,7 @@ daily-news-aggregator
 daily-news-aggregator-bin
 htmx-daily-news*
 miniflux-dashboard
-server
+/server
 *.exe
 *.exe~
 *.dll

@@ -6,13 +6,22 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/panospet/daily-news-aggregator/internal/cache"
 	"github.com/panospet/daily-news-aggregator/internal/models"
+)
+
+const (
+	sportsCategory = "Αθλητισμός"
+	maxSportsItems = 2
 )
 
 // athensLocation is the local timezone for scheduling and timestamps.
@@ -24,12 +33,129 @@ var athensLocation = func() *time.Location {
 	return loc
 }()
 
+var sportsTopicRe = regexp.MustCompile(
+	`(?i)(ολυμπιακ|παναθηναικ|παοκ|\bαεκ\b|\bαρης\b|euroleague|super\s*league|\bnba\b|champions\s*league|premier\s*league|europa\s*league|conference\s*league|τζοκοβιτς|τσιτσιπας|αντετοκουνμπο|φουρνιε|γιαννακοπουλ|ζαλγκιρις|εβερτον|κοβεντρι|gazz\s*floor|πεναλτι|γκολ|μπασκετ|ποδοσφαιρ)`,
+)
+
+func stripAccentsLower(s string) string {
+	var b strings.Builder
+	for _, r := range norm.NFD.String(strings.ToLower(s)) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// isSportsGroup reports whether a topic group is a sports story based on its
+// assigned category, tags, feed categories of its articles, or headline terms.
+func isSportsGroup(tg models.TopGroup) bool {
+	if strings.EqualFold(strings.TrimSpace(tg.Category), sportsCategory) {
+		return true
+	}
+	for _, t := range tg.Group.Tags {
+		if strings.EqualFold(strings.TrimSpace(t), sportsCategory) {
+			return true
+		}
+	}
+	arts := tg.Group.Articles
+	if len(arts) > 0 {
+		sportsArts := 0
+		for _, a := range arts {
+			cat := strings.ToLower(strings.TrimSpace(a.Category))
+			if cat == "sports" || cat == "αθλητισμός" || cat == "αθλητικα" || cat == "αθλητικά" {
+				sportsArts++
+			}
+		}
+		if sportsArts*2 >= len(arts) {
+			return true
+		}
+	}
+	return sportsTopicRe.MatchString(stripAccentsLower(tg.Group.Topic))
+}
+
+func isSportsItem(it cache.NewsBlockItem) bool {
+	if strings.EqualFold(strings.TrimSpace(it.Category), sportsCategory) {
+		return true
+	}
+	return sportsTopicRe.MatchString(stripAccentsLower(it.Topic))
+}
+
+// selectBriefingGroups partitions topGroups into non-sports and sports, caps
+// sports at maxSports (2), and places the sports groups at the end of the
+// selected slice of length <= n.
+func selectBriefingGroups(topGroups []models.TopGroup, n, maxSports int) []models.TopGroup {
+	if n <= 0 || len(topGroups) == 0 {
+		return nil
+	}
+	if maxSports < 0 {
+		maxSports = 0
+	}
+	var nonSports, sports []models.TopGroup
+	for _, tg := range topGroups {
+		if isSportsGroup(tg) {
+			tg.Category = sportsCategory
+			sports = append(sports, tg)
+		} else {
+			nonSports = append(nonSports, tg)
+		}
+	}
+	if len(sports) > maxSports {
+		sports = sports[:maxSports]
+	}
+	maxNonSports := n - len(sports)
+	if maxNonSports < 0 {
+		maxNonSports = 0
+		sports = sports[:n]
+	}
+	if len(nonSports) > maxNonSports {
+		nonSports = nonSports[:maxNonSports]
+	}
+	out := make([]models.TopGroup, 0, len(nonSports)+len(sports))
+	out = append(out, nonSports...)
+	out = append(out, sports...)
+	return out
+}
+
+// orderAndCapBriefingItems ensures that in any returned list (optionally capped
+// to limit > 0), there are at most maxSports sports items and they appear last.
+func orderAndCapBriefingItems(items []cache.NewsBlockItem, limit, maxSports int) []cache.NewsBlockItem {
+	var nonSports, sports []cache.NewsBlockItem
+	for _, it := range items {
+		if isSportsItem(it) {
+			it.Category = sportsCategory
+			sports = append(sports, it)
+		} else {
+			nonSports = append(nonSports, it)
+		}
+	}
+	if maxSports >= 0 && len(sports) > maxSports {
+		sports = sports[:maxSports]
+	}
+	if limit > 0 {
+		if len(sports) > limit {
+			sports = sports[:limit]
+		}
+		maxNonSports := limit - len(sports)
+		if len(nonSports) > maxNonSports {
+			nonSports = nonSports[:maxNonSports]
+		}
+	}
+	out := make([]cache.NewsBlockItem, 0, len(nonSports)+len(sports))
+	out = append(out, nonSports...)
+	out = append(out, sports...)
+	return out
+}
+
 // validSlot reports whether slot is one of the two briefing slots.
 func validSlot(slot string) bool {
 	return slot == "morning" || slot == "evening"
 }
 
 // HandleBriefingNews serves the pre-generated news block for a slot.
+// Supports an optional ?limit=N (or ?n=N) query parameter; sports items are
+// always capped at 2 and placed last.
 func (s *Server) HandleBriefingNews(w http.ResponseWriter, r *http.Request) {
 	slot := r.URL.Query().Get("slot")
 	if slot == "" {
@@ -54,6 +180,12 @@ func (s *Server) HandleBriefingNews(w http.ResponseWriter, r *http.Request) {
 		writeBriefingJSON(w, http.StatusNotFound, map[string]string{"error": "no news block for slot " + slot + " yet"})
 		return
 	}
+
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit, _ = strconv.Atoi(r.URL.Query().Get("n"))
+	}
+	block.Items = orderAndCapBriefingItems(block.Items, limit, maxSportsItems)
 	writeBriefingJSON(w, http.StatusOK, block)
 }
 
@@ -69,22 +201,49 @@ func (s *Server) HandleBriefingNewsGenerate(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	block, err := s.GenerateNewsBlock(r.Context(), slot)
+	genCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Minute)
+	defer cancel()
+
+	block, err := s.GenerateNewsBlock(genCtx, slot)
 	if err != nil {
 		log.Printf("[briefing] generation failed for %s: %v", slot, err)
 		writeBriefingJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
 		return
 	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 {
+		limit, _ = strconv.Atoi(r.URL.Query().Get("n"))
+	}
+	if limit > 0 {
+		block.Items = orderAndCapBriefingItems(block.Items, limit, maxSportsItems)
+	}
 	writeBriefingJSON(w, http.StatusOK, block)
 }
 
 // GenerateNewsBlock selects the top N groups (reusing the homepage topView
-// ranking), summarizes each via the grounded pipeline, and stores the result as
-// a read-only news block. It is idempotent and safe to run repeatedly.
+// ranking, with sports capped at 2 and placed last), summarizes each via the
+// grounded pipeline, and stores the result as a read-only news block.
 func (s *Server) GenerateNewsBlock(ctx context.Context, slot string) (cache.NewsBlock, error) {
-	data, err := s.AICache.Get(s.DB, s.FetchFn)
-	if err != nil {
-		return cache.NewsBlock{}, err
+	s.briefingMu.Lock()
+	defer s.briefingMu.Unlock()
+
+	var (
+		data *models.AIDashboardData
+		err  error
+	)
+	if s.AICache != nil {
+		data, err = s.AICache.EnsureFresh(s.DB, 90*time.Minute, s.FetchFn)
+	}
+	if err != nil || data == nil {
+		if s.AICache != nil && s.Cache != nil {
+			data, err = s.GetDataWithFallback()
+		}
+		if err != nil || data == nil {
+			if err == nil {
+				err = fmt.Errorf("no dashboard data available")
+			}
+			return cache.NewsBlock{}, err
+		}
 	}
 
 	n := s.Cfg.BriefingPregenN
@@ -93,9 +252,9 @@ func (s *Server) GenerateNewsBlock(ctx context.Context, slot string) (cache.News
 	}
 
 	view := topView(*data)
-	groups := view.TopGroups
-	if len(groups) > n {
-		groups = groups[:n]
+	groups := selectBriefingGroups(view.TopGroups, n, maxSportsItems)
+	if len(groups) == 0 {
+		return cache.NewsBlock{}, fmt.Errorf("no topic groups available to summarize")
 	}
 
 	// Summarize in parallel with a bounded worker count so we never flood the LLM.
@@ -107,8 +266,12 @@ func (s *Server) GenerateNewsBlock(ctx context.Context, slot string) (cache.News
 		wg.Add(1)
 		go func(i int, tg models.TopGroup) {
 			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
 			if item, ok := s.summarizeGroup(ctx, tg); ok {
 				items[i] = item
 			}
@@ -124,15 +287,14 @@ func (s *Server) GenerateNewsBlock(ctx context.Context, slot string) (cache.News
 		}
 	}
 
-	// Total failure → a titles-only block so the consumer still has something.
-	if len(compacted) == 0 {
-		for _, tg := range groups {
-			compacted = append(compacted, cache.NewsBlockItem{
-				Topic:       tg.Group.Topic,
-				Category:    tg.Category,
-				SummaryText: tg.Group.Topic,
-			})
-		}
+	compacted = orderAndCapBriefingItems(compacted, 0, maxSportsItems)
+
+	minRequired := 5
+	if len(groups) < minRequired {
+		minRequired = len(groups)
+	}
+	if len(compacted) < minRequired {
+		return cache.NewsBlock{}, fmt.Errorf("insufficient verified summaries for %s: got %d/%d (need at least %d)", slot, len(compacted), len(groups), minRequired)
 	}
 
 	block := cache.NewsBlock{
@@ -143,6 +305,7 @@ func (s *Server) GenerateNewsBlock(ctx context.Context, slot string) (cache.News
 	if s.NewsBlock != nil {
 		if err := s.NewsBlock.Set(slot, block); err != nil {
 			log.Printf("[briefing] failed to store news block for %s: %v", slot, err)
+			return cache.NewsBlock{}, fmt.Errorf("store news block: %w", err)
 		}
 	}
 	log.Printf("[briefing] news block for %s generated: %d items", slot, len(compacted))
@@ -153,6 +316,9 @@ func (s *Server) GenerateNewsBlock(ctx context.Context, slot string) (cache.News
 // summary cache when available so a warm cache never re-runs the LLM.
 func (s *Server) summarizeGroup(ctx context.Context, tg models.TopGroup) (cache.NewsBlockItem, bool) {
 	cat, g := tg.Category, tg.Group
+	if isSportsGroup(tg) {
+		cat = sportsCategory
+	}
 	topic := g.Topic
 
 	summary := models.AISummaryResult{}
@@ -160,6 +326,10 @@ func (s *Server) summarizeGroup(ctx context.Context, tg models.TopGroup) (cache.
 	if s.SummaryCache != nil {
 		if cached, ok, err := s.SummaryCache.GetGroup(cat, g.GroupID); err == nil && ok {
 			summary, found = cached, true
+		} else if cat != tg.Category {
+			if cachedOrig, okOrig, errOrig := s.SummaryCache.GetGroup(tg.Category, g.GroupID); errOrig == nil && okOrig {
+				summary, found = cachedOrig, true
+			}
 		}
 	}
 	if !found {
@@ -175,6 +345,9 @@ func (s *Server) summarizeGroup(ctx context.Context, tg models.TopGroup) (cache.
 		if s.SummaryCache != nil {
 			_ = s.SummaryCache.SetGroup(cat, g.GroupID, summary)
 		}
+		if len(summary.Sources) > 0 && strings.TrimSpace(summary.Sources[0]) != "" && s.AICache != nil {
+			s.AICache.UpdateTopic(tg.Category, g.GroupID, strings.TrimSpace(summary.Sources[0]))
+		}
 	}
 
 	finalTopic := topic
@@ -184,7 +357,7 @@ func (s *Server) summarizeGroup(ctx context.Context, tg models.TopGroup) (cache.
 
 	text := strings.TrimSpace(summary.Summary)
 	if text == "" {
-		text = finalTopic
+		return cache.NewsBlockItem{}, false
 	}
 
 	return cache.NewsBlockItem{
@@ -213,13 +386,15 @@ func (s *Server) StartBriefingPregen(ctx context.Context) {
 
 		trySlot := func(name string) {
 			log.Printf("[briefing] pre-generating %s news block", name)
-			if _, err := s.GenerateNewsBlock(context.Background(), name); err != nil {
+			if _, err := s.GenerateNewsBlock(ctx, name); err != nil {
 				log.Printf("[briefing] pre-generation failed for %s: %v", name, err)
 			}
 		}
 
 		ticker := time.NewTicker(60 * time.Second)
 		defer ticker.Stop()
+
+		eveningMin, eveningErr := parseHHMM(s.Cfg.BriefingPregenEvening)
 
 		for {
 			select {
@@ -239,6 +414,11 @@ func (s *Server) StartBriefingPregen(ctx context.Context) {
 					}
 					if nowMin < t {
 						continue // slot time not reached yet today
+					}
+					// Once the evening slot window begins, do not catch up a missed
+					// morning pre-generation concurrently with evening.
+					if sl.name == "morning" && eveningErr == nil && nowMin >= eveningMin {
+						continue
 					}
 					if s.NewsBlock != nil {
 						if block, ok, _ := s.NewsBlock.Get(sl.name); ok {

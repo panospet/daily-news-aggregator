@@ -865,6 +865,20 @@ a:hover { color: var(--accent-hover); }
     border-radius: var(--radius-sm);
     border-left: 3px solid var(--green);
     box-shadow: var(--shadow-sm);
+    width: 100%;
+}
+
+.summary {
+    width: 100% !important;
+    align-self: flex-start;
+}
+
+/* responsive summary width */
+@media (min-width: 769px) and (max-width: 1199px) {
+    .summary { width: 50% !important; align-self: flex-start; }
+}
+@media (min-width: 1200px) {
+    .summary { width: 30% !important; align-self: flex-start; }
 }
 
 /* ---------- Sources List ---------- */

@@ -294,6 +294,61 @@ func (c *AICache) refreshBlocking(db *sql.DB, fetchFresh func(db *sql.DB) (*mode
 	return newData, nil
 }
 
+// EnsureFresh returns AI dashboard data that is at most maxAge old. When the
+// cached entry is missing or older than maxAge, it refreshes synchronously
+// before returning (falling back to any existing cached entry if the refresh
+// fails). Used by audio-briefing pre-generation so the 07:45/19:45 run never
+// summarizes an hour-old cluster snapshot.
+func (c *AICache) EnsureFresh(db *sql.DB, maxAge time.Duration, fetchFresh func(db *sql.DB) (*models.AIDashboardData, error)) (*models.AIDashboardData, error) {
+	if c == nil || c.client == nil {
+		return nil, fmt.Errorf("ai cache unavailable")
+	}
+	if maxAge <= 0 {
+		maxAge = 20 * time.Minute
+	}
+	ctx := context.Background()
+	var staleData *models.AIDashboardData
+	if val, err := c.client.Get(ctx, "ai_cache").Result(); err == nil {
+		var wrapper RedisWrapper[*models.AIDashboardData]
+		if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil && wrapper.Data != nil {
+			if time.Since(wrapper.Ts) < maxAge {
+				return wrapper.Data, nil
+			}
+			staleData = wrapper.Data
+		}
+	}
+
+	c.refreshMutex.Lock()
+	defer c.refreshMutex.Unlock()
+
+	if val, err := c.client.Get(ctx, "ai_cache").Result(); err == nil {
+		var wrapper RedisWrapper[*models.AIDashboardData]
+		if jsonErr := json.Unmarshal([]byte(val), &wrapper); jsonErr == nil && wrapper.Data != nil {
+			if time.Since(wrapper.Ts) < maxAge {
+				return wrapper.Data, nil
+			}
+			staleData = wrapper.Data
+		}
+	}
+
+	if fetchFresh == nil {
+		if staleData != nil {
+			return staleData, nil
+		}
+		return nil, fmt.Errorf("ai cache empty and no fetch function configured")
+	}
+
+	fresh, err := c.refreshBlocking(db, fetchFresh)
+	if err != nil {
+		if staleData != nil {
+			log.Printf("AI synchronous refresh failed, using existing cached data: %v", err)
+			return staleData, nil
+		}
+		return nil, err
+	}
+	return fresh, nil
+}
+
 func (c *AICache) Invalidate() {
 	c.client.Del(context.Background(), "ai_cache")
 }
@@ -420,13 +475,13 @@ func FetchFresh(db *sql.DB, repo *database.Repository, groupSvc *grouping.Servic
 
 		loc, _ := time.LoadLocation("Europe/Athens")
 		return &models.AIDashboardData{
-			Categories: groups,
-			Total:      total,
-			Generated:  time.Now().In(loc).Format("15:04:05"),
-			IsFallback: isFlatFallback,
+			Categories:    groups,
+			Total:         total,
+			Generated:     time.Now().In(loc).Format("15:04:05"),
+			IsFallback:    isFlatFallback,
 			IsLLMFallback: isLLMFallback,
-			TopTags:    topTags,
-			TopFeeds:   topFeeds,
+			TopTags:       topTags,
+			TopFeeds:      topFeeds,
 		}, nil
 	}
 }

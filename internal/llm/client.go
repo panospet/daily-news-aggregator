@@ -17,7 +17,7 @@ type Client struct {
 	HTTPClient        *http.Client
 	CommandCodeAPIKey string
 	CommandCodeModel  string
-	FallbackAPIKey      string
+	FallbackAPIKey    string
 	// Endpoint overrides the Command Code chat-completions URL. Empty means production;
 	// tests point it at an httptest server.
 	Endpoint string
@@ -138,17 +138,24 @@ type nativeGenConfig struct {
 }
 
 type nativeRequest struct {
-	Contents         []nativeContent `json:"contents"`
-	GenerationConfig *nativeGenConfig  `json:"generationConfig,omitempty"`
+	Contents         []nativeContent  `json:"contents"`
+	GenerationConfig *nativeGenConfig `json:"generationConfig,omitempty"`
 }
 
 // ---------- public methods ----------
 
 func (c *Client) Call(prompt string, schema *Schema) (string, bool, error) {
-	resp, err := c.CallWithModel(prompt, c.model(), 65536, schema)
+	return c.CallContext(context.Background(), prompt, schema)
+}
+
+func (c *Client) CallContext(ctx context.Context, prompt string, schema *Schema) (string, bool, error) {
+	resp, err := c.CallWithModelContext(ctx, prompt, c.model(), 65536, schema)
 	if err != nil {
+		if ctx.Err() != nil {
+			return "", false, ctx.Err()
+		}
 		log.Printf("[LLM] CommandCode call failed: %v. Falling back to native Gemini...", err)
-		fallbackResp, fErr := c.CallNativeFallback(prompt, schema)
+		fallbackResp, fErr := c.CallNativeFallbackContext(ctx, prompt, schema)
 		if fErr != nil {
 			return "", false, fmt.Errorf("CommandCode error: %v, Fallback error: %w", err, fErr)
 		}
@@ -171,6 +178,10 @@ func (c *Client) CallGrouping(prompt string) (string, bool, error) {
 }
 
 func (c *Client) CallNativeFallback(prompt string, schema *Schema) (string, error) {
+	return c.CallNativeFallbackContext(context.Background(), prompt, schema)
+}
+
+func (c *Client) CallNativeFallbackContext(ctx context.Context, prompt string, schema *Schema) (string, error) {
 	if c.FallbackAPIKey == "" {
 		return "", fmt.Errorf("GEMINI_API_KEY not configured")
 	}
@@ -191,7 +202,7 @@ func (c *Client) CallNativeFallback(prompt string, schema *Schema) (string, erro
 	}
 
 	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" + c.FallbackAPIKey
-	httpReq, err := http.NewRequest("POST", url, bytes.NewReader(bodyBytes))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return "", err
 	}
@@ -233,6 +244,10 @@ func (c *Client) CallNativeFallback(prompt string, schema *Schema) (string, erro
 }
 
 func (c *Client) CallWithModel(prompt, model string, maxTokens int, schema *Schema) (string, error) {
+	return c.CallWithModelContext(context.Background(), prompt, model, maxTokens, schema)
+}
+
+func (c *Client) CallWithModelContext(ctx context.Context, prompt, model string, maxTokens int, schema *Schema) (string, error) {
 	if c.CommandCodeAPIKey == "" {
 		return "", fmt.Errorf("COMMAND_CODE_API_KEY not configured")
 	}
@@ -259,7 +274,7 @@ func (c *Client) CallWithModel(prompt, model string, maxTokens int, schema *Sche
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	httpReq, err := http.NewRequest("POST", c.endpoint(), bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.endpoint(), bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}

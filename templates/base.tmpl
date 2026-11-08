@@ -374,7 +374,7 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
 .src-meta { display:block; font-family:var(--mono); font-size:10px; color:var(--dim); margin-top:4px; }
 .fb { float:right; margin-top:-14px; font-size:14px; opacity:0.5; }
 .fb:hover { opacity:1; }
-.summary { font-size:13px; line-height:1.7; margin-bottom:16px; color:var(--text); }
+.summary { font-size:13px; line-height:1.7; margin-bottom:16px; color:var(--text); width:100%; }
 .summary em { color:var(--muted); }
 /* Typing dots while a summary streams in. Decorative only — the card is replaced by the
    verified version when the stream finishes, so this never outlives the request. */
@@ -423,6 +423,8 @@ a.tag:hover { border-color:var(--acc2); color:#fff; }
   .cards { grid-template-columns:1fr; }
   .card--open { grid-column:auto; }
 }
+@media (min-width: 769px) and (max-width: 1199px) { .summary { width:50% !important; } }
+@media (min-width: 1200px) { .summary { width:30% !important; } }
 </style>
 </head>
 <body>

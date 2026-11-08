@@ -16,8 +16,8 @@ import (
 
 // Service handles AI-powered article grouping.
 type Service struct {
-	LLM llm.Caller
-	Repo   *database.Repository
+	LLM  llm.Caller
+	Repo *database.Repository
 	// BaseURL of the Python AI clustering service, e.g. http://127.0.0.1:8001
 	AIServiceURL string
 }

@@ -70,7 +70,7 @@ func (s *NewsBlockStore) Set(slot string, block NewsBlock) error {
 	}
 	ttl := s.ttl
 	if ttl <= 0 {
-		ttl = 36 * time.Hour
+		ttl = 14 * time.Hour
 	}
 	return s.client.Set(context.Background(), s.key(slot), b, ttl).Err()
 }

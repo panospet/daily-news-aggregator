@@ -53,6 +53,8 @@ services:
       - FETCHER_ALLOW_PRIVATE_NETWORKS=1
       - INTEGRATION_ALLOW_PRIVATE_NETWORKS=1
       - HTTP_CLIENT_TIMEOUT=120
+      # Don't abandon feeds after repeated errors; keep polling them.
+      - POLLING_PARSING_ERROR_LIMIT=0
     restart: always
 
   db:

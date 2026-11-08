@@ -17,7 +17,7 @@ import (
 
 // Service handles AI-powered article summarization.
 type Service struct {
-	LLM    llm.Caller
+	LLM       llm.Caller
 	Extractor *Extractor // optional; when set, short articles are enriched before summarizing
 }
 
@@ -33,10 +33,22 @@ func (s *Service) Summarize(topic string, articles []models.Article) (models.AIS
 	return s.SummarizeContext(context.Background(), topic, articles)
 }
 
+// contextCaller is an optional extension of llm.Caller that honours context cancellation.
+type contextCaller interface {
+	CallContext(ctx context.Context, prompt string, schema *llm.Schema) (string, bool, error)
+}
+
+func (s *Service) callLLM(ctx context.Context, prompt string, schema *llm.Schema) (string, bool, error) {
+	if cc, ok := s.LLM.(contextCaller); ok {
+		return cc.CallContext(ctx, prompt, schema)
+	}
+	return s.LLM.Call(prompt, schema)
+}
+
 // SummarizeContext is Summarize with a caller-supplied context.
 func (s *Service) SummarizeContext(ctx context.Context, topic string, articles []models.Article) (models.AISummaryResult, error) {
 	return s.summarize(ctx, topic, articles, func(prompt string) (string, bool, error) {
-		return s.LLM.Call(prompt, summarySchema())
+		return s.callLLM(ctx, prompt, summarySchema())
 	})
 }
 
@@ -329,8 +341,8 @@ Return JSON: {"summary": "Περίληψη... [1]\n\n Επόμενη παράγ�
 		if reason == "" {
 			cleanSummary := stripCitationRe.ReplaceAllString(parsed.Summary, "")
 			return models.AISummaryResult{
-				Summary: cleanSummary,
-				Sources: []string{parsed.Topic},
+				Summary:    cleanSummary,
+				Sources:    []string{parsed.Topic},
 				IsFallback: isFallback,
 			}, nil
 		}

@@ -105,4 +105,3 @@ func TestStartBackgroundRefresh_RebuildsWithoutPageViewAndStopsOnCancel(t *testi
 		t.Errorf("refresher kept running after cancel: %d -> %d", settled, got)
 	}
 }
-

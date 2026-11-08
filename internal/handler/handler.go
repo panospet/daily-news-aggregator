@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/panospet/daily-news-aggregator/internal/cache"
@@ -24,18 +25,19 @@ import (
 
 // Server holds all dependencies for HTTP handlers.
 type Server struct {
-	Cfg        config.Config
-	DB         *sql.DB
-	Tpl        *TemplateSet
-	Cache      *cache.ArticleCache
-	AICache    *cache.AICache
-	GroupMap   *cache.GroupMapping
+	Cfg          config.Config
+	DB           *sql.DB
+	Tpl          *TemplateSet
+	Cache        *cache.ArticleCache
+	AICache      *cache.AICache
+	GroupMap     *cache.GroupMapping
 	Summarizer   *summarize.Service
 	SummaryCache *cache.SummaryCache
 	NewsBlock    *cache.NewsBlockStore
 	FetchFn      func(db *sql.DB) (*models.AIDashboardData, error)
-	RetryFn    func(hours int) (*models.DashboardData, error)
-	Repo       *database.Repository
+	RetryFn      func(hours int) (*models.DashboardData, error)
+	Repo         *database.Repository
+	briefingMu   sync.Mutex
 }
 
 // aiServiceURL returns the configured Python AI service base URL,
@@ -439,15 +441,15 @@ func (s *Server) Search(w http.ResponseWriter, r *http.Request) {
 		sort.SliceStable(feedArticles, func(i, j int) bool {
 			return feedArticles[i].Published.After(feedArticles[j].Published)
 		})
-		
+
 		// Wrap in a dummy group so we can render it
 		filtered.TopGroups = []models.TopGroup{
 			{
 				Category: "Feed",
 				Group: models.AIGroup{
-					Topic: feedName,
+					Topic:    feedName,
 					Articles: feedArticles,
-					Count: len(feedArticles),
+					Count:    len(feedArticles),
 				},
 			},
 		}
@@ -695,10 +697,10 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 		_ = s.Tpl.Partial.ExecuteTemplate(w, "summary", map[string]interface{}{
 			"Topic":      cachedTopic,
 			"Summary":    template.HTML(formattedSummary),
-			"Articles":  targetGroup.Articles,
-			"Category":  cat,
-			"GroupID":   targetGroup.GroupID,
-			"Tags":      targetGroup.Tags,
+			"Articles":   targetGroup.Articles,
+			"Category":   cat,
+			"GroupID":    targetGroup.GroupID,
+			"Tags":       targetGroup.Tags,
 			"IsFallback": cached.IsFallback,
 		})
 		return
@@ -743,12 +745,12 @@ func (s *Server) HandleSummarize(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_ = s.Tpl.Partial.ExecuteTemplate(w, "summary", map[string]interface{}{
-		"Topic":    targetTopic,
-		"Summary":  template.HTML(formattedSummary),
-		"Articles": targetGroup.Articles,
-		"Category": cat,
-		"GroupID":  targetGroup.GroupID,
-		"Tags":     targetGroup.Tags,
+		"Topic":      targetTopic,
+		"Summary":    template.HTML(formattedSummary),
+		"Articles":   targetGroup.Articles,
+		"Category":   cat,
+		"GroupID":    targetGroup.GroupID,
+		"Tags":       targetGroup.Tags,
 		"IsFallback": summary.IsFallback,
 	})
 }

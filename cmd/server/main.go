@@ -18,9 +18,9 @@ import (
 	"github.com/panospet/daily-news-aggregator/internal/cache"
 	"github.com/panospet/daily-news-aggregator/internal/config"
 	"github.com/panospet/daily-news-aggregator/internal/database"
-	"github.com/panospet/daily-news-aggregator/internal/llm"
 	"github.com/panospet/daily-news-aggregator/internal/grouping"
 	"github.com/panospet/daily-news-aggregator/internal/handler"
+	"github.com/panospet/daily-news-aggregator/internal/llm"
 	"github.com/panospet/daily-news-aggregator/internal/models"
 	"github.com/panospet/daily-news-aggregator/internal/summarize"
 )
@@ -76,10 +76,10 @@ func main() {
 	}
 
 	llmClient := &llm.Client{
-		HTTPClient: httpClient,
+		HTTPClient:        httpClient,
 		CommandCodeAPIKey: cfg.CommandCodeAPIKey,
 		CommandCodeModel:  cfg.CommandCodeModel,
-		FallbackAPIKey:      cfg.FallbackAPIKey,
+		FallbackAPIKey:    cfg.FallbackAPIKey,
 	}
 
 	repo := &database.Repository{DB: db}
@@ -108,18 +108,18 @@ func main() {
 	newsBlock := cache.NewNewsBlockStore(redisClient, time.Duration(cfg.BriefingNewsBlockTTLHours)*time.Hour)
 
 	srv := &handler.Server{
-		Cfg:        cfg,
-		DB:         db,
-		Tpl:        tpl,
-		Cache:      cache.NewArticleCache(redisClient, 2*time.Minute),
+		Cfg:          cfg,
+		DB:           db,
+		Tpl:          tpl,
+		Cache:        cache.NewArticleCache(redisClient, 2*time.Minute),
 		AICache:      aiCache,
 		SummaryCache: cache.NewSummaryCache(redisClient, 60*time.Minute),
 		NewsBlock:    newsBlock,
-		GroupMap:   groupMap,
-		Summarizer: summarizeSvc,
-		FetchFn:    fetchFn,
-		RetryFn:    retryFn,
-		Repo:       repo,
+		GroupMap:     groupMap,
+		Summarizer:   summarizeSvc,
+		FetchFn:      fetchFn,
+		RetryFn:      retryFn,
+		Repo:         repo,
 	}
 
 	mux := http.NewServeMux()
