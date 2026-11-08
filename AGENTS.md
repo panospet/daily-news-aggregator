@@ -10,22 +10,19 @@ A self-hosted news aggregation stack:
 - **Go dashboard** (`cmd/server`) queries Miniflux's DB, clusters articles via
   the **Python AI service** (`ai/main.py`: fastembed + spaCy + Gemini naming),
   caches the clustered view in Redis (`ai_cache`, DB 0), and exposes an
-  HTMX UI + JSON APIs.
-- **Kalodio** (`kalodio/`) is the official public frontend served at
-  **https://newspaper.panos.pet** — a stdlib-only Python "newspaper" UI that
-  reads `ai_cache` from Redis directly and proxies summaries to the dashboard.
+  HTMX UI + JSON APIs. The dashboard is the main (and only) frontend, including
+  the public one at **https://newspaper.panos.pet**.
 
 ## Ports & routing
 
 | Port | Service | Auth | Notes |
 |------|---------|------|-------|
 | 8080 | Go dashboard (HTMX + JSON APIs) | basic auth | main server |
-| 8280 | kalodio (newspaper frontend) | none (tailnet/tunnel only) | run manually; not in compose |
 | 8001 | Python AI service | internal | clustering/embeddings |
 | 6379 | Redis (bind 127.0.0.1) | none local | ai_cache lives here |
 
 `newspaper.panos.pet` → Cloudflare tunnel (`cloudflared-newspaper`,
-token-managed) → `localhost:8080` → socat → `kalodio:8280`.
+token-managed, service in compose) → `localhost:8080` (Go dashboard).
 The tunnel ingress is configured in the Cloudflare dashboard; do not change
 ports on the tunnel side without updating it there too.
 
@@ -58,18 +55,13 @@ go test ./internal/...    # unit tests
 docker compose up -d --build   # run the whole stack
 ```
 
-The `kalodio` service needs no build step locally: `python3 kalodio/kalodio.py`.
-
 ## History / revert
 
 - Tag **`legacy-frontend`** marks the commit where the HTMX dashboard was
-  still the main frontend. To revert the public site: check out that tag,
-  restore `PORT=8080` for the dashboard service, and remove the
-  `tunnel-port-forward` + `kalodio` services from compose.
+  split off from an earlier standalone frontend era (the `kalodio` newspaper
+  frontend, since removed). Kept for historical reference only.
 
 ## Conventions
 
 - Commit messages: one clear task per commit, simple imperative style.
-- Never commit secrets; `.env` files stay untracked. Credentials for the
-  dashboard basic-auth are read by kalodio from `.env` at runtime.
-- Kalodio must remain stdlib-only Python (no pip dependencies).
+- Never commit secrets; `.env` files stay untracked.
