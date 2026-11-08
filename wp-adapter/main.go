@@ -62,6 +62,12 @@ func fetchWP(w http.ResponseWriter, r *http.Request) {
 	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (WP-RSS-Adapter/1.0)")
 
+	// Allow callers to name the feed; defaults to the original single-site behavior.
+	feedTitle := r.URL.Query().Get("title")
+	if feedTitle == "" {
+		feedTitle = "News 24/7 (via Adapter)"
+	}
+
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -90,7 +96,7 @@ func fetchWP(w http.ResponseWriter, r *http.Request) {
 	rss := RSS{
 		Version: "2.0",
 		Channel: RSSChannel{
-			Title:       "News 24/7 (via Adapter)",
+			Title:       feedTitle,
 			Link:        targetURL,
 			Description: "RSS feed generated from WP REST API",
 		},
