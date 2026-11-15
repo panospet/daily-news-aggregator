@@ -811,11 +811,15 @@ func (s *Server) HandleSummarizeStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Cache-Control", "no-cache, no-store, no-transform")
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // never let a proxy buffer the stream
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
+	// Source enrichment can take several seconds before the first model token.
+	// Send an event now so the browser can show an active, readable state.
+	_ = write("status", map[string]string{"message": "Reading original sources and preparing the summary…"})
 
 	data, err := s.AICache.Get(s.DB, s.FetchFn)
 	if err != nil {

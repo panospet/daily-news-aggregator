@@ -1,166 +1,183 @@
 {{define "articles"}}
 <div id="stream" hx-boost="true" hx-target="#stream" hx-swap="outerHTML" hx-push-url="true">
-{{if .IsFallback}}<div class="notice-banner">⏳ AI grouping is running in the background. Showing raw articles temporarily.</div>{{end}}
-{{if eq .View "feed"}}
-<div class="topgrid-head">
-  <div class="topgrid-title">{{.Query}}</div>
-  <div class="topgrid-sub">{{.Total}} {{if eq .Total 1}}article{{else}}articles{{end}}</div>
-</div>
-<div class="card card--open" style="pointer-events: none;">
-  <div class="card__body" style="display: block; pointer-events: auto;">
-    <ul class="src-list">
+  {{if .IsFallback}}<div class="notice-banner" role="status"><span class="notice-banner__icon">↻</span><div><strong>The presses are warming up.</strong><p>AI grouping is running in the background. Raw articles are shown temporarily.</p></div></div>{{end}}
+
+  {{if eq .View "feed"}}
+  <header class="section-head">
+    <div><span class="section-head__kicker">Source archive</span><h2>{{.Query}}</h2></div>
+    <span class="section-head__count">{{.Total}} {{if eq .Total 1}}article{{else}}articles{{end}}</span>
+  </header>
+  <section class="feed-reader" aria-label="Articles from {{.Query}}">
+    <ul class="src-list feed-list">
       {{range $idx, $tg := .TopGroups}}
         {{range $tg.Group.Articles}}
-          <li style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px;">
-            <div style="width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 12px;">
-              <a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a>
-              <span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span>
-            </div>
-            <button class="btn-sum" style="margin: 6px 0 0 0; padding: 4px 8px; font-size: 10px;" hx-post="/summarize-article" hx-vals='{"article_id":"{{.ID}}"}' hx-target="closest li" hx-swap="outerHTML" hx-push-url="false"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
-          </li>
+        <li class="feed-article">
+          <div class="feed-article__copy">
+            <a class="source-link" href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><svg class="icon source-arrow"><use href="#i-arrow"></use></svg></a>
+            <span class="src-meta">{{.Feed}} <span>·</span> {{.TimeAgo}}</span>
+          </div>
+          <button class="btn-sum btn-sum--small" type="button" hx-post="/summarize-article" hx-vals='{"article_id":"{{.ID}}"}' hx-target="closest li" hx-swap="outerHTML" hx-push-url="false"><svg class="icon"><use href="#i-spark"></use></svg><span class="btn-sum__text">Summarize</span><span class="btn-sum__spinner" aria-hidden="true"></span></button>
+        </li>
         {{end}}
       {{end}}
     </ul>
-  </div>
-</div>
-{{else if or (eq .View "top") (eq .View "tags") (eq .View "search")}}
-<div class="topgrid-head">
-  <div class="topgrid-title">{{if eq .View "top"}}Top Stories{{else}}Results{{end}}</div>
-  <div class="topgrid-sub">{{.Total}} {{if eq .Total 1}}story group{{else}}story groups{{end}} · {{if eq .View "top"}}most related articles first{{else}}matching groups{{end}}</div>
-</div>
-<div class="cards topgrid">
-  {{range $idx, $tg := .TopGroups}}
-  {{if lt $idx 40}}
-  {{template "card" (dict "Category" $tg.Category "Group" $tg.Group)}}
-  {{end}}
-  {{end}}
-  {{if and (eq .View "tags") (gt (len .TopGroups) 40)}}
-  {{template "cards-sentinel" (dict "url" (printf "/cards?tag=%s&offset=40" (.Query | urlquery)) )}}
-  {{end}}
-{{if eq (len .TopGroups) 0}}<div class="empty"><div class="empty__icon">◎</div><h2>No matching stories</h2><p>Try a different search or tag.</p></div>{{end}}
-{{else}}
-{{range .Categories}}
-<section class="cat" id="cat-{{.Category}}">
-  <div class="cat__head">
-    <span class="cat__icon">{{catIcon .Category}}</span>
-    <span class="cat__name">{{.Category}}</span>
-    <span class="cat__count">{{.Count}} {{if eq .Count 1}}story{{else}}stories{{end}}</span>
-    <span class="cat__arrow">▾</span>
-  </div>
-  {{if eq .Count 0}}<div class="empty-cat">No stories in this category.</div>{{else}}
-  <div class="cards" id="cards-{{.Category}}">
-    {{$cat := .Category}}
-    {{range $idx, $group := .Groups}}
-    {{if lt $idx 10}}
-    {{template "card" (dict "Category" $cat "Group" $group)}}
+  </section>
+
+  {{else if or (eq .View "top") (eq .View "tags") (eq .View "search")}}
+  <header class="section-head">
+    <div><span class="section-head__kicker">{{if eq .View "top"}}The front page{{else if eq .View "tags"}}#{{.Query}}{{else}}Search the archive{{end}}</span><h2>{{if eq .View "top"}}Top stories{{else}}Results{{end}}</h2></div>
+    <div class="section-head__aside"><span class="section-head__count">{{.Total}} {{if eq .Total 1}}story group{{else}}story groups{{end}}</span><span class="section-head__note">{{if eq .View "top"}}Most reported first{{else}}Matching groups{{end}}</span></div>
+  </header>
+  <div class="cards topgrid">
+    {{range $idx, $tg := .TopGroups}}
+      {{if lt $idx 40}}{{template "card" (dict "Category" $tg.Category "Group" $tg.Group "Index" (add $idx 1))}}{{end}}
     {{end}}
-    {{end}}
-    {{if gt (len .Groups) 10}}
-    {{template "cards-sentinel" (dict "url" (printf "/cards?cat=%s&offset=10" (.Category | urlquery)) )}}
-    {{end}}
+    {{if and (eq .View "tags") (gt (len .TopGroups) 40)}}{{template "cards-sentinel" (dict "url" (printf "/cards?tag=%s&offset=40" (.Query | urlquery)))}}{{end}}
+    {{if eq (len .TopGroups) 0}}<div class="empty"><span class="empty__mark">N/</span><h2>No matching stories</h2><p>Try another phrase, source, or tag.</p></div>{{end}}
   </div>
+
+  {{else}}
+    {{range .Categories}}
+    <section class="cat" id="cat-{{.Category}}">
+      <div class="cat__head" role="button" tabindex="0" aria-expanded="true">
+        <span class="cat__icon">{{catIcon .Category}}</span>
+        <h2 class="cat__name">{{.Category}}</h2>
+        <span class="cat__count">{{.Count}} {{if eq .Count 1}}story{{else}}stories{{end}}</span>
+        <svg class="icon cat__arrow"><use href="#i-chevron"></use></svg>
+      </div>
+      {{if eq .Count 0}}<div class="empty-cat">No stories in this category.</div>{{else}}
+      <div class="cards" id="cards-{{.Category}}">
+        {{$cat := .Category}}
+        {{range $idx, $group := .Groups}}
+          {{if lt $idx 10}}{{template "card" (dict "Category" $cat "Group" $group "Index" (add $idx 1))}}{{end}}
+        {{end}}
+        {{if gt (len .Groups) 10}}{{template "cards-sentinel" (dict "url" (printf "/cards?cat=%s&offset=10" (.Category | urlquery)))}}{{end}}
+      </div>
+      {{end}}
+    </section>
+    {{end}}
+    {{if eq (len .Categories) 0}}<div class="empty"><span class="empty__mark">N/</span><h2>No matching stories</h2><p>Try another phrase, source, or tag.</p></div>{{end}}
   {{end}}
-</section>
-{{end}}
-{{if eq (len .Categories) 0}}<div class="empty"><div class="empty__icon">◎</div><h2>No matching stories</h2><p>Try a different search or tag.</p></div>{{end}}
-{{end}}
 </div>
 {{end}}
 
 {{define "card"}}
-<div class="card" id="topic-{{.Group.GroupID}}" data-group-id="{{.Group.GroupID}}" data-group-count="{{.Group.Count}}" data-cat="{{.Category | urlquery}}">
+<article class="card" id="topic-{{.Group.GroupID}}" data-group-id="{{.Group.GroupID}}" data-group-count="{{.Group.Count}}" data-cat="{{.Category}}">
   <div class="card__head">
-    <span class="card__num">◈</span>
-    <span class="card__title">{{.Group.Topic}}</span>
-    <span class="card__cnt">{{.Group.Count}}</span>
+    <button class="card__toggle" type="button" data-card-toggle aria-expanded="false" aria-controls="body-{{.Group.GroupID}}">
+      <span class="card__num">{{if .Index}}{{printf "%02d" .Index}}{{else}}&nbsp;{{end}}</span>
+      <span class="card__story"><span class="card__category">{{.Category}}</span><span class="card__title">{{.Group.Topic}}</span></span>
+      <span class="card__cnt"><strong>{{.Group.Count}}</strong><span>{{if eq .Group.Count 1}}report{{else}}reports{{end}}</span></span>
+      <svg class="icon card__chevron"><use href="#i-chevron"></use></svg>
+    </button>
   </div>
-  <div class="card__body"></div>
-</div>
+  <div class="card__body" id="body-{{.Group.GroupID}}"></div>
+</article>
 {{end}}
 
 {{define "card-body"}}
-    <a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a>
-    <div class="card__tags">{{range .Group.Tags}}<a class="tag" href="/search?q=%23{{. | urlquery}}">#{{.}}</a>{{end}}{{range uniqueFeeds .Group.Articles}}<span class="tag tag--src">{{.}}</span>{{end}}</div>
-    <button class="btn-sum" type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.Group.GroupID}}"><span class="btn-sum__text">✦ Summarize</span><span class="btn-sum__spinner"></span></button>
-    <div class="summary summary--stream" hidden><span class="summary__text"></span><em class="summary__note" aria-hidden="true"><span>.</span><span>.</span><span>.</span></em></div>
-    <div class="src-label">Sources</div>
-    <ul class="src-list">{{range .Group.Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span></li>{{end}}</ul>
+<div class="story-meta">
+  <a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a>
+  <div class="card__tags">{{range .Group.Tags}}<a class="tag" href="/search?q=%23{{. | urlquery}}">#{{.}}</a>{{end}}{{range uniqueFeeds .Group.Articles}}<span class="tag tag--src">{{.}}</span>{{end}}</div>
+</div>
+<div class="story-reader">
+  <section class="story-brief" aria-label="AI story summary">
+    <div class="story-brief__label">The short version <span>Grounded in the sources</span></div>
+    <button class="btn-sum" type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.Group.GroupID}}"><svg class="icon"><use href="#i-spark"></use></svg><span class="btn-sum__text">Summarize this story</span><span class="btn-sum__spinner" aria-hidden="true"></span></button>
+    <div class="summary summary--stream" role="status" aria-live="polite" hidden><div class="summary__progress"><span class="summary__status">Preparing your summary…</span><em class="summary__note" aria-hidden="true"><span>.</span><span>.</span><span>.</span></em></div><span class="summary__text"></span></div>
+  </section>
+  <section class="story-sources" aria-label="Original sources">
+    <div class="src-label"><span>On the record</span><span>{{len .Group.Articles}} {{if eq (len .Group.Articles) 1}}source{{else}}sources{{end}}</span></div>
+    <ul class="src-list">{{range .Group.Articles}}<li><a class="source-link" href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><svg class="icon source-arrow"><use href="#i-arrow"></use></svg></a><div class="src-meta"><span>{{.Feed}}</span><span>·</span><span>{{.TimeAgo}}</span></div></li>{{end}}</ul>
+  </section>
+</div>
 {{end}}
 
 {{define "cards-sentinel"}}
-<div class="sentinel" hx-get="{{.url}}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="#loading" hx-push-url="false"></div>
+<div class="sentinel" hx-get="{{.url}}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="#loading" hx-push-url="false" aria-hidden="true"><span class="sentinel__line"></span></div>
 {{end}}
 
 {{define "cards-empty"}}
-<div class="empty"><div class="empty__icon">◎</div><h2>No more stories</h2><p>You've reached the end.</p></div>
+<div class="empty"><span class="empty__mark">N/</span><h2>No more stories</h2><p>You’ve reached the end of this edition.</p></div>
 {{end}}
 
 {{define "summary"}}
-<div class="card card--open" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-cat="{{.Category | urlquery}}" data-summarized="true">
+<article class="card card--open card--summarized" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-cat="{{.Category}}" data-summarized="true">
   <div class="card__head">
-    <span class="card__num">AI</span>
-    <span class="card__title">{{.Topic}}</span>
-    <span class="card__cnt">{{len .Articles}}</span>
-    <button class="btn-unread" style="display:none" title="Mark unread">📬 Unread</button>
-    <button type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.GroupID}}" class="btn-retry-sum" title="Retry summary">🔄</button>
-    <button hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" class="btn-pos-feedback" title="Good summary">👍</button>
+    <button class="card__toggle" type="button" data-card-toggle aria-expanded="true" aria-controls="body-{{.GroupID}}">
+      <span class="card__num card__num--ai">AI</span>
+      <span class="card__story"><span class="card__category">{{.Category}}</span><span class="card__title">{{.Topic}}</span></span>
+      <span class="card__cnt"><strong>{{len .Articles}}</strong><span>{{if eq (len .Articles) 1}}report{{else}}reports{{end}}</span></span>
+      <svg class="icon card__chevron"><use href="#i-chevron"></use></svg>
+    </button>
+    <div class="card-actions">
+      <button class="icon-button btn-unread" type="button" style="display:none" title="Mark unread" aria-label="Mark topic unread"><svg class="icon"><use href="#i-mail"></use></svg></button>
+      <button class="icon-button btn-retry-sum" type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.GroupID}}" title="Regenerate summary" aria-label="Regenerate summary"><svg class="icon"><use href="#i-refresh"></use></svg></button>
+      <button class="icon-button btn-pos-feedback" type="button" hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Good summary" aria-label="Mark summary as helpful"><svg class="icon"><use href="#i-thumb"></use></svg></button>
+    </div>
   </div>
-  <div class="card__body" data-loaded="1">
-    <a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a>
-    <div class="card__tags">{{range .Tags}}<a class="tag" href="/search?q=%23{{. | urlquery}}">#{{.}}</a>{{end}}</div>
-    <div class="summary">{{if .IsFallback}}<div style="font-size: 11px; color: #f5a623; margin-bottom: 5px;">⚡ Summarized using Gemini Fallback</div>{{end}}{{.Summary}}</div>
-    {{if gt (len .Articles) 3}}
-    <form hx-post="/summarize/more" hx-target="this" hx-swap="outerHTML" hx-push-url="false" style="margin-bottom: 15px; margin-top: 5px;">
-      <input type="hidden" name="category" value="{{.Category}}">
-      <input type="hidden" name="group_id" value="{{.GroupID}}">
-      <input type="hidden" name="existing_summary" value="{{.Summary}}">
-      <button type="submit" class="btn-sum" style="width: auto; padding: 4px 12px; margin: 0;" onclick="this.classList.add('htmx-request'); this.querySelector('.btn-sum__text').style.display='none';">
-        <span class="btn-sum__text" style="font-size: 12px;">Πείτε μου περισσότερα...</span>
-        <span class="btn-sum__spinner" style="border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; width: 12px; height: 12px; display: none; animation: spin 0.6s linear infinite;"></span>
-      </button>
-    </form>
-    {{end}}
-    <div class="src-label">Sources</div>
-    <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span><button class="fb" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Not relevant">✕</button></li>{{end}}</ul>
+  <div class="card__body" id="body-{{.GroupID}}" data-loaded="1">
+    <div class="story-meta"><a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a><div class="card__tags">{{range .Tags}}<a class="tag" href="/search?q=%23{{. | urlquery}}">#{{.}}</a>{{end}}</div></div>
+    <div class="story-reader">
+      <section class="story-brief" aria-label="AI story summary">
+        <div class="story-brief__label">The short version <span>Grounded in the sources</span></div>
+        <div class="summary">{{if .IsFallback}}<div class="summary-fallback-label">Summarized using Gemini fallback</div>{{end}}{{.Summary}}</div>
+        {{if gt (len .Articles) 3}}
+        <form class="more-form" hx-post="/summarize/more" hx-target="this" hx-swap="outerHTML" hx-push-url="false">
+          <input type="hidden" name="category" value="{{.Category}}">
+          <input type="hidden" name="group_id" value="{{.GroupID}}">
+          <input type="hidden" name="existing_summary" value="{{.Summary}}">
+          <button type="submit" class="btn-more"><span class="btn-sum__text">Tell me more</span><span aria-hidden="true">+</span><span class="btn-sum__spinner" aria-hidden="true"></span></button>
+        </form>
+        {{end}}
+      </section>
+      <section class="story-sources" aria-label="Original sources">
+        <div class="src-label"><span>On the record</span><span>{{len .Articles}} {{if eq (len .Articles) 1}}source{{else}}sources{{end}}</span></div>
+        <ul class="src-list">{{range .Articles}}<li><a class="source-link" href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><svg class="icon source-arrow"><use href="#i-arrow"></use></svg></a><div class="src-meta"><span>{{.Feed}}</span><span>·</span><span>{{.TimeAgo}}</span><button class="fb" type="button" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Mark source as not relevant" aria-label="Mark source as not relevant">Not relevant ×</button></div></li>{{end}}</ul>
+      </section>
+    </div>
   </div>
-</div>
+</article>
 {{end}}
 
 {{define "summary-fallback"}}
-<div class="card card--open" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-cat="{{.Category | urlquery}}" data-summarized="true">
+<article class="card card--open card--summarized" id="topic-{{.GroupID}}" data-group-id="{{.GroupID}}" data-group-count="{{len .Articles}}" data-cat="{{.Category}}" data-summarized="true">
   <div class="card__head">
-    <span class="card__num">AI</span>
-    <span class="card__title">{{.Topic}}</span>
-    <span class="card__cnt">{{len .Articles}}</span>
-    <button class="btn-unread" style="display:none" title="Mark unread">📬 Unread</button>
-    <button type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.GroupID}}" class="btn-retry-sum" title="Retry summary">🔄</button>
-    <button hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" class="btn-pos-feedback" title="Good summary">👍</button>
+    <button class="card__toggle" type="button" data-card-toggle aria-expanded="true" aria-controls="body-{{.GroupID}}">
+      <span class="card__num card__num--ai">AI</span>
+      <span class="card__story"><span class="card__category">{{.Category}}</span><span class="card__title">{{.Topic}}</span></span>
+      <span class="card__cnt"><strong>{{len .Articles}}</strong><span>{{if eq (len .Articles) 1}}report{{else}}reports{{end}}</span></span>
+      <svg class="icon card__chevron"><use href="#i-chevron"></use></svg>
+    </button>
+    <div class="card-actions">
+      <button class="icon-button btn-unread" type="button" style="display:none" title="Mark unread" aria-label="Mark topic unread"><svg class="icon"><use href="#i-mail"></use></svg></button>
+      <button class="icon-button btn-retry-sum" type="button" data-stream-summarize data-category="{{.Category}}" data-group-id="{{.GroupID}}" title="Regenerate summary" aria-label="Regenerate summary"><svg class="icon"><use href="#i-refresh"></use></svg></button>
+      <button class="icon-button btn-pos-feedback" type="button" hx-post="/feedback/positive" hx-vals='{"category":"{{.Category}}","group_id":"{{.GroupID}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Good summary" aria-label="Mark summary as helpful"><svg class="icon"><use href="#i-thumb"></use></svg></button>
+    </div>
   </div>
-  <div class="card__body" data-loaded="1">
-    <a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a>
-    <div class="summary"><em>Summary unavailable. Sources below.</em></div>
-    <div class="src-label">Sources</div>
-    <ul class="src-list">{{range .Articles}}<li><a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a><span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span><button class="fb" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Not relevant">✕</button></li>{{end}}</ul>
+  <div class="card__body" id="body-{{.GroupID}}" data-loaded="1">
+    <div class="story-meta"><a class="cat-chip" href="/filter?cat={{.Category | urlquery}}">{{catIcon .Category}} {{.Category}}</a></div>
+    <div class="story-reader">
+      <section class="story-brief" aria-label="AI story summary"><div class="story-brief__label">The short version</div><div class="summary summary--unavailable"><em>Summary unavailable. The original reporting is listed here.</em></div></section>
+      <section class="story-sources" aria-label="Original sources">
+        <div class="src-label"><span>On the record</span><span>{{len .Articles}} {{if eq (len .Articles) 1}}source{{else}}sources{{end}}</span></div>
+        <ul class="src-list">{{range .Articles}}<li><a class="source-link" href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><svg class="icon source-arrow"><use href="#i-arrow"></use></svg></a><div class="src-meta"><span>{{.Feed}}</span><span>·</span><span>{{.TimeAgo}}</span><button class="fb" type="button" hx-post="/feedback" hx-vals='{"category":"{{$.Category}}","group_id":"{{$.GroupID}}","irrelevant_url":"{{.URL}}"}' hx-target="this" hx-swap="outerHTML" hx-push-url="false" title="Mark source as not relevant" aria-label="Mark source as not relevant">Not relevant ×</button></div></li>{{end}}</ul>
+      </section>
+    </div>
   </div>
-</div>
+</article>
 {{end}}
 
 {{define "summary-article"}}
-<li style="display: flex; flex-direction: column; gap: 8px; background: var(--card-open); padding: 12px; border-radius: 8px; border: 1px solid var(--acc);">
-  <div style="width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 12px;">
-    <a href="{{.Article.URL}}" target="_blank" rel="noopener" style="font-weight: 600;"><span>{{.Article.Title}}</span><span>→</span></a>
-    <span class="src-meta">{{.Article.Feed}} · {{.Article.TimeAgo}}</span>
-  </div>
-  <div class="summary" style="margin-bottom: 0;">{{.Summary}}</div>
+<li class="feed-article feed-article--summary">
+  <div class="feed-article__copy"><a class="source-link" href="{{.Article.URL}}" target="_blank" rel="noopener"><span>{{.Article.Title}}</span><svg class="icon source-arrow"><use href="#i-arrow"></use></svg></a><span class="src-meta">{{.Article.Feed}} <span>·</span> {{.Article.TimeAgo}}</span></div>
+  <div class="summary"><span class="summary-fallback-label">AI summary</span>{{.Summary}}</div>
 </li>
 {{end}}
 
 {{define "summary-article-fallback"}}
-<li style="display: flex; flex-direction: column; gap: 8px; background: var(--card-open); padding: 12px; border-radius: 8px; border: 1px solid var(--line);">
-  <div style="width: 100%; display: flex; justify-content: space-between; gap: 10px; font-size: 12px;">
-    <a href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><span>→</span></a>
-    <span class="src-meta">{{.Feed}} · {{.TimeAgo}}</span>
-  </div>
-  <div class="summary" style="margin-bottom: 0;"><em>Summary unavailable.</em></div>
+<li class="feed-article feed-article--summary">
+  <div class="feed-article__copy"><a class="source-link" href="{{.URL}}" target="_blank" rel="noopener"><span>{{.Title}}</span><svg class="icon source-arrow"><use href="#i-arrow"></use></svg></a><span class="src-meta">{{.Feed}} <span>·</span> {{.TimeAgo}}</span></div>
+  <div class="summary summary--unavailable"><em>Summary unavailable.</em></div>
 </li>
 {{end}}

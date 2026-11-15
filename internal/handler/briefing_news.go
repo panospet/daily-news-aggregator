@@ -360,10 +360,24 @@ func (s *Server) summarizeGroup(ctx context.Context, tg models.TopGroup) (cache.
 		return cache.NewsBlockItem{}, false
 	}
 
+	sources := make([]cache.NewsBlockSource, 0, len(g.Articles))
+	for _, a := range g.Articles {
+		src := cache.NewsBlockSource{
+			Newspaper: strings.TrimSpace(a.Feed),
+			Title:     strings.TrimSpace(a.Title),
+			URL:       strings.TrimSpace(a.URL),
+		}
+		if src.Newspaper == "" && src.Title == "" && src.URL == "" {
+			continue
+		}
+		sources = append(sources, src)
+	}
+
 	return cache.NewsBlockItem{
 		Topic:       finalTopic,
 		Category:    cat,
 		SummaryText: text,
+		Sources:     sources,
 	}, true
 }
 

@@ -8,11 +8,19 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
+// NewsBlockSource is one source article backing a news item.
+type NewsBlockSource struct {
+	Newspaper string `json:"newspaper"`
+	Title     string `json:"title"`
+	URL       string `json:"url"`
+}
+
 // NewsBlockItem is one speech-ready news item for the audio briefing.
 type NewsBlockItem struct {
-	Topic       string `json:"topic"`
-	Category    string `json:"category"`
-	SummaryText string `json:"summary_text"`
+	Topic       string            `json:"topic"`
+	Category    string            `json:"category"`
+	SummaryText string            `json:"summary_text"`
+	Sources     []NewsBlockSource `json:"sources,omitempty"`
 }
 
 // NewsBlock is a pre-generated, read-only news block for one briefing slot.

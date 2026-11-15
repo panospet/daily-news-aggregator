@@ -13,11 +13,11 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 - Articles are intelligently mapped into 6 distinct categories based on language and content (e.g. `Ελληνική ειδησεογραφία`, `Ξένη ειδησεογραφία`, `Νέες μουσικές κυκλοφορίες`).
 
 ### 2. Dashboard UI & UX
-- Completely overhauled the dashboard with a premium, state-of-the-art UI.
-- Upgraded typography to `Inter` for a sleek professional look.
-- Added animated, heavily blurred glassmorphism to the sidebar (`backdrop-filter: blur(24px)`).
-- Included animated mesh gradient backgrounds for depth.
-- Refined micro-animations, hover tilt states, and animated gradient underlines for headers.
+- Rebuilt the dashboard as **Newsroom**, an editorial interface inspired by a printed daily newspaper.
+- Uses warm paper/ink themes, `Manrope` and `Noto Serif` typography, a sticky navigation rail, and a numbered story ledger.
+- Expanded stories use a reading-focused layout with grounded AI summaries beside their original sources.
+- Supports desktop and off-canvas mobile navigation, light/dark themes, responsive feed archive views, and accessible keyboard interactions.
+- Styles and browser interactions live in `static/style.css` and `static/app.js`; HTMX remains vendored and the Go handlers continue to render all HTML fragments.
 
 ### 3. Data & Caching
 - Added robust dual-caching in Redis: 
@@ -110,10 +110,11 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 ### Frontend (`templates/`, `static/`)
 | File | Purpose |
 |------|---------|
-| `templates/base.tmpl` | Main HTML layout: sidebar with categories, search bar, mesh-glow background, Inter font |
-| `templates/partials/articles.tmpl` | Article cards with expand/collapse, feedback thumbs-down buttons, source pills |
-| `templates/partials/stats.tmpl` | Stats bar (article count) |
-| `static/style.css` | Full CSS: design tokens (CSS vars), glassmorphism sidebar, mesh gradient animations, card hover effects, responsive breakpoints |
+| `templates/base.tmpl` | Newsroom page shell: masthead, category/feed/tag navigation, search, edition details, and SVG icon library |
+| `templates/partials/articles.tmpl` | Ranked story ledger, expandable reading views, feed archive, summaries, feedback controls, and infinite-scroll fragments |
+| `templates/partials/stats.tmpl` | Stats fragment templates |
+| `static/style.css` | Editorial design tokens, paper/ink themes, responsive navigation, story layouts, and reduced-motion support |
+| `static/app.js` | Theme, navigation drawer, read state, HTMX lifecycle hooks, and streaming summary behavior |
 | `static/htmx.min.js` | HTMX library (vendored) |
 
 ### Infrastructure
