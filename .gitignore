@@ -35,6 +35,7 @@ feedback.txt
 neg_fb.json
 pos_fb.json
 req.json
+.tools/
 
 # IDE
 .vscode/
