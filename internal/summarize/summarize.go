@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -24,7 +25,7 @@ type Service struct {
 // Summarize generates a summary for a group of articles about a topic.
 //
 // Anti-hallucination pipeline:
-//  1. (optional) fetch full article text for teaser-stub articles
+//  1. narrow the group to a diverse set of sources (MMR), enriching only those
 //  2. drop articles that remain too short to contribute facts
 //  3. prompt Gemini to ground every claim in numbered sources and cite them
 //  4. verify: reject the summary if it cites no sources or mentions
@@ -188,37 +189,15 @@ func decodePartialJSONString(s string) string {
 	return b.String()
 }
 
-// summarize is the whole pipeline — enrich, filter, cap, prompt, generate, verify — with
+// summarize is the whole pipeline — select, prompt, generate, verify — with
 // the generation step injected, so the streaming and non-streaming paths differ only in
 // how the text travels, never in what is asked or how it is checked.
 func (s *Service) summarize(ctx context.Context, topic string, articles []models.Article, call func(string) (string, bool, error)) (models.AISummaryResult, error) {
-	arts := articles
-
-	// 1. Best-effort enrichment of stub articles with real page text.
-	if s.Extractor != nil {
-		enrichCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-		s.Extractor.EnrichGroup(enrichCtx, arts)
-		cancel()
-	}
-
-	// 2. Drop contentless stubs — they carry titles, not facts.
-	usable := make([]models.Article, 0, len(arts))
-	for _, a := range arts {
-		if len(strings.Fields(a.Content)) >= minSourceWords {
-			usable = append(usable, a)
-		}
-	}
-	if len(usable) == 0 {
-		return models.AISummaryResult{}, fmt.Errorf("no article has enough content to summarize (all stubs)")
-	}
-
-	// Cap at most recent 20 sources to reduce hallucination pressure on large groups.
-	const maxSources = 20
-	if len(usable) > maxSources {
-		sort.Slice(usable, func(i, j int) bool {
-			return usable[i].Published.After(usable[j].Published)
-		})
-		usable = usable[:maxSources]
+	// Narrow the group to a diverse, useful set of sources (MMR). The original
+	// article list is untouched; this only decides what reaches the LLM.
+	usable, err := s.prepareSources(ctx, articles)
+	if err != nil {
+		return models.AISummaryResult{}, err
 	}
 
 	var sb strings.Builder
@@ -358,33 +337,10 @@ func (s *Service) SummarizeMore(topic string, existingSummary string, articles [
 
 // SummarizeMoreContext is SummarizeMore with a caller-supplied context.
 func (s *Service) SummarizeMoreContext(ctx context.Context, topic string, existingSummary string, articles []models.Article) (string, error) {
-	arts := articles
-
-	// 1. Best-effort enrichment of stub articles with real page text.
-	if s.Extractor != nil {
-		enrichCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-		s.Extractor.EnrichGroup(enrichCtx, arts)
-		cancel()
-	}
-
-	// 2. Drop contentless stubs — they carry titles, not facts.
-	usable := make([]models.Article, 0, len(arts))
-	for _, a := range arts {
-		if len(strings.Fields(a.Content)) >= minSourceWords {
-			usable = append(usable, a)
-		}
-	}
-	if len(usable) == 0 {
-		return "", fmt.Errorf("no article has enough content to summarize (all stubs)")
-	}
-
-	// Cap at most recent 20 sources to reduce hallucination pressure on large groups.
-	const maxSources = 20
-	if len(usable) > maxSources {
-		sort.Slice(usable, func(i, j int) bool {
-			return usable[i].Published.After(usable[j].Published)
-		})
-		usable = usable[:maxSources]
+	// Narrow the group to a diverse, useful set of sources (MMR).
+	usable, err := s.prepareSources(ctx, articles)
+	if err != nil {
+		return "", err
 	}
 
 	var sb strings.Builder
@@ -522,6 +478,160 @@ Return JSON: {"more_details": "Νέες λεπτομέρειες... [3]"}
 // minSourceWords is the minimum content length for an article to count as a
 // usable source. Shorter items are teaser stubs: titles without facts.
 const minSourceWords = 50
+
+// Source-selection tuning. A summary group is already a semantic cluster, so a
+// naive "best N by length or recency" ranking lets near-duplicate syndications
+// (the same wire story on several sites) crowd out distinct reporting. MMR
+// picks each next source by what it adds beyond the ones already chosen.
+const (
+	// maxSources caps how many articles are fed to the LLM for one summary.
+	maxSources = 10
+	// candidatePool is how many articles get enriched before the final pick.
+	// Enrichment fetches real page text, so we first narrow on the stored teaser
+	// content to avoid fetching near-duplicate copies of the same story.
+	candidatePool = 2 * maxSources
+	// mmrLambda scales the diversity penalty. A near-duplicate (Jaccard ≈0.6)
+	// must cost more than the relevance gap between a 500-word and a 5000-word
+	// article (log1p gap ≈2.3), so distinct reporting reliably beats a longer
+	// copy of text we already have.
+	mmrLambda = 3.0
+	// maxPerFeed caps how many sources one outlet may contribute, so a single
+	// feed cannot dominate the summary or skew its grounding toward one slant.
+	maxPerFeed = 3
+)
+
+// htmlStripRe removes HTML tags before tokenizing article content for scoring.
+var htmlStripRe = regexp.MustCompile(`<[^>]*>`)
+
+// prepareSources narrows a group's articles down to a diverse, useful set for
+// one summary: pick a candidate pool by MMR on the stored teaser text, enrich
+// only that pool, drop stubs, then run a final MMR pick on the enriched text.
+// The caller's article slice is never mutated — this only decides what reaches
+// the LLM, so the related-articles list elsewhere is unchanged.
+func (s *Service) prepareSources(ctx context.Context, articles []models.Article) ([]models.Article, error) {
+	// Stable newest-first order so recency is the tie-break inside selectMMR
+	// (a strict > comparison keeps the first, i.e. newest, of equal scores).
+	ordered := make([]models.Article, len(articles))
+	copy(ordered, articles)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		return ordered[i].Published.After(ordered[j].Published)
+	})
+
+	// First pass on teaser content: a diverse pool to enrich, so we don't fetch
+	// near-duplicate copies of the same story.
+	pool := selectMMR(ordered, candidatePool)
+
+	if s.Extractor != nil {
+		enrichCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+		s.Extractor.EnrichGroup(enrichCtx, pool)
+		cancel()
+	}
+
+	// Drop contentless stubs — they carry titles, not facts.
+	usable := make([]models.Article, 0, len(pool))
+	for _, a := range pool {
+		if len(strings.Fields(a.Content)) >= minSourceWords {
+			usable = append(usable, a)
+		}
+	}
+	if len(usable) == 0 {
+		return nil, fmt.Errorf("no article has enough content to summarize (all stubs)")
+	}
+
+	return selectMMR(usable, maxSources), nil
+}
+
+// selectMMR greedily selects up to limit articles by maximal marginal
+// relevance: log-scaled content length (relevance) minus mmrLambda times the
+// highest Jaccard word-overlap with any article already selected (the
+// "marginal" penalty). A per-feed cap keeps one outlet from dominating, and the
+// newest-first input order makes recency the tie-break.
+func selectMMR(articles []models.Article, limit int) []models.Article {
+	if limit <= 0 || len(articles) == 0 {
+		return []models.Article{}
+	}
+	if limit > len(articles) {
+		limit = len(articles)
+	}
+
+	type doc struct {
+		art   models.Article
+		set   map[string]struct{}
+		total int
+	}
+	docs := make([]doc, len(articles))
+	for i, a := range articles {
+		plain := htmlStripRe.ReplaceAllString(a.Content, " ")
+		fields := strings.Fields(plain)
+		set := make(map[string]struct{}, len(fields))
+		for _, w := range fields {
+			set[strings.ToLower(w)] = struct{}{}
+		}
+		docs[i] = doc{art: a, set: set, total: len(fields)}
+	}
+
+	selected := make([]doc, 0, limit)
+	chosen := make([]bool, len(docs))
+	feedCount := make(map[string]int)
+
+	for len(selected) < limit {
+		best := -1
+		bestScore := math.Inf(-1)
+		for i := range docs {
+			if chosen[i] {
+				continue
+			}
+			if feedCount[docs[i].art.Feed] >= maxPerFeed {
+				continue
+			}
+			var maxSim float64
+			for _, s := range selected {
+				if sim := jaccard(docs[i].set, s.set); sim > maxSim {
+					maxSim = sim
+				}
+			}
+			score := math.Log1p(float64(docs[i].total)) - mmrLambda*maxSim
+			if score > bestScore {
+				bestScore = score
+				best = i
+			}
+		}
+		if best == -1 {
+			break
+		}
+		chosen[best] = true
+		selected = append(selected, docs[best])
+		feedCount[docs[best].art.Feed]++
+	}
+
+	out := make([]models.Article, len(selected))
+	for i, d := range selected {
+		out[i] = d.art
+	}
+	return out
+}
+
+// jaccard returns word-set similarity between two tokenized articles: shared
+// terms over all distinct terms. 1.0 means identical word sets, 0 none shared.
+func jaccard(a, b map[string]struct{}) float64 {
+	if len(a) == 0 && len(b) == 0 {
+		return 0
+	}
+	if len(a) > len(b) {
+		a, b = b, a
+	}
+	shared := 0
+	for w := range a {
+		if _, ok := b[w]; ok {
+			shared++
+		}
+	}
+	union := len(a) + len(b) - shared
+	if union == 0 {
+		return 0
+	}
+	return float64(shared) / float64(union)
+}
 
 // articleData is one numbered source prepared for the prompt.
 type articleData struct {

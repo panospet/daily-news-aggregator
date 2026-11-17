@@ -340,3 +340,119 @@ func TestStripCitationsForStream(t *testing.T) {
 		}
 	}
 }
+
+func titles(arts []models.Article) []string {
+	out := make([]string, len(arts))
+	for i, a := range arts {
+		out[i] = a.Title
+	}
+	return out
+}
+
+func containsTitle(arts []models.Article, t string) bool {
+	for _, a := range arts {
+		if a.Title == t {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSelectMMR_SkipsNearDuplicates(t *testing.T) {
+	story := strings.Repeat("the government announced a new tax policy today ", 20)
+	distinct := strings.Repeat("a football team won the championship match ", 6)
+
+	now := time.Now()
+	a := models.Article{Title: "A original", Feed: "FeedX", Content: story, Published: now}
+	b := models.Article{Title: "B copy", Feed: "FeedY", Content: story, Published: now.Add(-time.Minute)}
+	c := models.Article{Title: "C distinct", Feed: "FeedZ", Content: distinct, Published: now.Add(-2 * time.Minute)}
+
+	got := selectMMR([]models.Article{a, b, c}, 2)
+
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sources, got %d: %v", len(got), titles(got))
+	}
+	if !containsTitle(got, "C distinct") {
+		t.Errorf("distinct article should be selected over the duplicate, got %v", titles(got))
+	}
+	if containsTitle(got, "A original") && containsTitle(got, "B copy") {
+		t.Errorf("both near-duplicates selected, diversity failed: %v", titles(got))
+	}
+}
+
+func TestSelectMMR_PerFeedCap(t *testing.T) {
+	now := time.Now()
+	arts := make([]models.Article, 5)
+	for i := range arts {
+		arts[i] = models.Article{
+			Title:     fmt.Sprintf("feed article %d", i),
+			Feed:      "SameFeed",
+			Content:   fmt.Sprintf("exclusive content words for article number %d ", i) + strings.Repeat("more text ", 30),
+			Published: now.Add(time.Duration(-i) * time.Minute),
+		}
+	}
+	got := selectMMR(arts, 10)
+	if len(got) != maxPerFeed {
+		t.Fatalf("per-feed cap %d not enforced, got %d sources", maxPerFeed, len(got))
+	}
+}
+
+func TestSelectMMR_CapsAtMaxSources(t *testing.T) {
+	now := time.Now()
+	arts := make([]models.Article, 40)
+	for i := range arts {
+		arts[i] = models.Article{
+			Title:     fmt.Sprintf("article %d", i),
+			Feed:      fmt.Sprintf("feed%d", i),
+			Content:   fmt.Sprintf("unique token set for article number %d ", i) + strings.Repeat("additional filler words ", 20),
+			Published: now.Add(time.Duration(-i) * time.Minute),
+		}
+	}
+	got := selectMMR(arts, maxSources)
+	if len(got) != maxSources {
+		t.Fatalf("expected %d sources, got %d", maxSources, len(got))
+	}
+}
+
+func TestSummarize_CapsPromptSources(t *testing.T) {
+	var promptLen int
+	mock := &countingMock{resp: `{"summary": "Σύνοψη [1]", "topic": "t"}`, seen: &promptLen}
+	svc := &Service{LLM: mock}
+
+	now := time.Now()
+	arts := make([]models.Article, 30)
+	for i := range arts {
+		arts[i] = models.Article{
+			Title:     fmt.Sprintf("article %d", i),
+			Feed:      fmt.Sprintf("feed%d", i),
+			Content:   strings.Repeat(fmt.Sprintf("unique content words for article %d ", i), 10),
+			Published: now.Add(time.Duration(-i) * time.Minute),
+		}
+	}
+	if _, err := svc.Summarize("Topic", arts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if n := strings.Count(mock.lastPrompt, "Title: "); n > maxSources {
+		t.Errorf("prompt fed %d sources, want <= %d", n, maxSources)
+	}
+}
+
+func TestPrepareSources_DoesNotMutateInput(t *testing.T) {
+	svc := &Service{} // no Extractor, no LLM needed
+	now := time.Now()
+	in := []models.Article{
+		{Title: "one", Feed: "F", Content: strings.Repeat("πρώτο άρθρο με αρκετό περιεχόμενο για σύνοψη ", 10), Published: now},
+		{Title: "two", Feed: "F", Content: strings.Repeat("δεύτερο άρθρο με διαφορετικό περιεχόμενο ", 10), Published: now.Add(-time.Minute)},
+	}
+	snapshot := make([]models.Article, len(in))
+	copy(snapshot, in)
+
+	if _, err := svc.prepareSources(context.Background(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for i := range in {
+		if in[i].Title != snapshot[i].Title || in[i].Content != snapshot[i].Content {
+			t.Errorf("input mutated at %d", i)
+		}
+	}
+}
