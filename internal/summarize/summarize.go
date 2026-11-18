@@ -20,6 +20,16 @@ import (
 type Service struct {
 	LLM       llm.Caller
 	Extractor *Extractor // optional; when set, short articles are enriched before summarizing
+	// Embeddings optionally supplies pre-computed article embeddings so the
+	// topic-relevance gate can drop mis-clustered articles before selection.
+	// Nil disables the embedding gate (the lexical fallback still runs).
+	Embeddings EmbeddingLookup
+}
+
+// EmbeddingLookup fetches pre-computed article embeddings by ID.
+// *database.Repository satisfies this.
+type EmbeddingLookup interface {
+	GetEmbeddings(articleIDs []int64) (map[int64][]float32, error)
 }
 
 // Summarize generates a summary for a group of articles about a topic.
@@ -500,6 +510,26 @@ const (
 	maxPerFeed = 3
 )
 
+// Topic-relevance gate tuning. A mis-clustered article must not reach the
+// summary, so before MMR we drop articles that don't belong to the cluster's
+// topic. Embeddings (cosine similarity to the cluster centroid) are the
+// primary signal; a lexical fallback covers fresh articles whose embeddings
+// have not been computed yet.
+const (
+	// offTopicSimThreshold drops an article whose cosine similarity to the
+	// cluster centroid is below this. Same-topic news clusters sit well above
+	// 0.5; a mis-clustered article lands near 0.1-0.2.
+	offTopicSimThreshold = 0.35
+	// minEmbeddingCoverage is the fraction of the cluster that must have
+	// stored embeddings before the centroid is trusted. Below this (fresh
+	// articles), the lexical gate runs instead.
+	minEmbeddingCoverage = 0.5
+	// lexicalOffTopicThreshold drops an article whose mean word-overlap with
+	// the rest of the cluster is below this. No stopword removal, so it is
+	// deliberately tiny and only catches the "shares no vocabulary" case.
+	lexicalOffTopicThreshold = 0.01
+)
+
 // htmlStripRe removes HTML tags before tokenizing article content for scoring.
 var htmlStripRe = regexp.MustCompile(`<[^>]*>`)
 
@@ -516,6 +546,11 @@ func (s *Service) prepareSources(ctx context.Context, articles []models.Article)
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return ordered[i].Published.After(ordered[j].Published)
 	})
+
+	// Drop mis-clustered articles before MMR, or their length + novelty would
+	// win them a diversity bonus precisely because they share no words with
+	// the on-topic articles.
+	ordered = s.filterOffTopic(ordered)
 
 	// First pass on teaser content: a diverse pool to enrich, so we don't fetch
 	// near-duplicate copies of the same story.
@@ -631,6 +666,151 @@ func jaccard(a, b map[string]struct{}) float64 {
 		return 0
 	}
 	return float64(shared) / float64(union)
+}
+
+// filterOffTopic removes articles that don't belong to the cluster's topic
+// before MMR selection, so a mis-clustered article can't win the diversity
+// bonus and reach the summary. Prefers stored embeddings (cosine similarity
+// to the cluster centroid); falls back to mean word-overlap with the rest of
+// the cluster when embeddings are unavailable. Single-article clusters and
+// articles we cannot judge are left untouched, and the gate is never allowed
+// to empty the cluster.
+func (s *Service) filterOffTopic(articles []models.Article) []models.Article {
+	if len(articles) <= 1 {
+		return articles
+	}
+
+	if s.Embeddings != nil {
+		ids := make([]int64, 0, len(articles))
+		for _, a := range articles {
+			ids = append(ids, a.ID)
+		}
+		emb, err := s.Embeddings.GetEmbeddings(ids)
+		if err != nil {
+			log.Printf("[summarize] embedding lookup failed, using lexical gate: %v", err)
+		} else if kept, ok := gateByEmbedding(articles, emb); ok {
+			return kept
+		}
+	}
+
+	return filterLexicalOffTopic(articles)
+}
+
+// gateByEmbedding drops articles whose embedding is far from the rest of the
+// cluster. It returns (kept, false) when embeddings are too sparse or
+// inconsistent to judge, so the caller falls back to the lexical gate. Each
+// article is compared to the mean of the OTHER vectors (leave-one-out), so an
+// off-topic article is judged against the cluster it does not belong to and
+// can never inflate its own score.
+func gateByEmbedding(articles []models.Article, emb map[int64][]float32) ([]models.Article, bool) {
+	dim := 0
+	var sum []float32
+	n := 0
+	for _, a := range articles {
+		e, ok := emb[a.ID]
+		if !ok || len(e) == 0 {
+			continue
+		}
+		if dim == 0 {
+			dim = len(e)
+			sum = make([]float32, dim)
+		} else if len(e) != dim {
+			return nil, false // inconsistent embedding lengths; can't trust
+		}
+		for i := range e {
+			sum[i] += e[i]
+		}
+		n++
+	}
+	if n < 2 || float64(n) < float64(len(articles))*minEmbeddingCoverage {
+		return nil, false
+	}
+
+	kept := make([]models.Article, 0, len(articles))
+	for _, a := range articles {
+		e, ok := emb[a.ID]
+		if !ok || len(e) != dim {
+			kept = append(kept, a) // can't judge; leave in place
+			continue
+		}
+		other := make([]float32, dim)
+		for i := range sum {
+			other[i] = (sum[i] - e[i]) / float32(n-1)
+		}
+		if sim := cosineSim(e, other); sim < offTopicSimThreshold {
+			log.Printf("[summarize] dropped off-topic article %q (sim %.3f)", a.Title, sim)
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if len(kept) == 0 {
+		return articles, true
+	}
+	return kept, true
+}
+
+// filterLexicalOffTopic drops articles whose mean word-overlap with the rest
+// of the cluster is below lexicalOffTopicThreshold. It is the fallback when
+// embeddings are unavailable. Word sets are lowercased with single-character
+// tokens removed, but no stopword removal, so the threshold is tiny and only
+// catches an article that shares almost no vocabulary with the cluster.
+func filterLexicalOffTopic(articles []models.Article) []models.Article {
+	sets := make([]map[string]struct{}, len(articles))
+	for i, a := range articles {
+		plain := htmlStripRe.ReplaceAllString(a.Content, " ")
+		fields := strings.Fields(plain)
+		set := make(map[string]struct{}, len(fields))
+		for _, w := range fields {
+			w = strings.ToLower(w)
+			if len([]rune(w)) <= 1 {
+				continue
+			}
+			set[w] = struct{}{}
+		}
+		sets[i] = set
+	}
+
+	kept := make([]models.Article, 0, len(articles))
+	for i, a := range articles {
+		if len(sets[i]) == 0 {
+			kept = append(kept, a)
+			continue
+		}
+		var total float64
+		for j := range articles {
+			if i == j {
+				continue
+			}
+			total += jaccard(sets[i], sets[j])
+		}
+		if total/float64(len(articles)-1) < lexicalOffTopicThreshold {
+			continue
+		}
+		kept = append(kept, a)
+	}
+	if len(kept) == 0 {
+		return articles
+	}
+	return kept
+}
+
+// cosineSim returns the cosine similarity of two equal-length vectors, or 0
+// for zero-length or mismatched vectors.
+func cosineSim(a, b []float32) float64 {
+	if len(a) == 0 || len(a) != len(b) {
+		return 0
+	}
+	var dot, na, nb float64
+	for i := range a {
+		af, bf := float64(a[i]), float64(b[i])
+		dot += af * bf
+		na += af * af
+		nb += bf * bf
+	}
+	if na == 0 || nb == 0 {
+		return 0
+	}
+	return dot / (math.Sqrt(na) * math.Sqrt(nb))
 }
 
 // articleData is one numbered source prepared for the prompt.

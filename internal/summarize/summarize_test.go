@@ -456,3 +456,93 @@ func TestPrepareSources_DoesNotMutateInput(t *testing.T) {
 		}
 	}
 }
+
+// mockEmbeddingLookup is a test double for EmbeddingLookup.
+type mockEmbeddingLookup struct {
+	m   map[int64][]float32
+	err error
+}
+
+func (m *mockEmbeddingLookup) GetEmbeddings(ids []int64) (map[int64][]float32, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.m, nil
+}
+
+func TestFilterOffTopic_EmbeddingGate_DropsIrrelevant(t *testing.T) {
+	svc := &Service{Embeddings: &mockEmbeddingLookup{m: map[int64][]float32{
+		1: {1, 0, 0},
+		2: {0.9, 0.1, 0},
+		3: {0.8, 0.2, 0.1},
+		4: {0, 1, 0}, // off-topic: orthogonal to the cluster centroid
+	}}}
+	arts := []models.Article{
+		{ID: 1, Title: "on1", Feed: "F", Content: strings.Repeat("politics budget vote ", 10)},
+		{ID: 2, Title: "on2", Feed: "F", Content: strings.Repeat("politics budget vote ", 10)},
+		{ID: 3, Title: "on3", Feed: "F", Content: strings.Repeat("politics budget vote ", 10)},
+		{ID: 4, Title: "off", Feed: "F", Content: strings.Repeat("football match goal ", 10)},
+	}
+	got := svc.filterOffTopic(arts)
+	if containsTitle(got, "off") {
+		t.Errorf("off-topic article should be dropped, got %v", titles(got))
+	}
+	if len(got) != 3 {
+		t.Errorf("expected 3 kept articles, got %d: %v", len(got), titles(got))
+	}
+}
+
+func TestFilterOffTopic_KeepsArticleWithoutEmbedding(t *testing.T) {
+	// 2 of 3 articles have embeddings (>= half) → embedding gate runs, but the
+	// article without an embedding must pass through unjudged.
+	svc := &Service{Embeddings: &mockEmbeddingLookup{m: map[int64][]float32{
+		1: {1, 0, 0},
+		2: {0.9, 0.1, 0},
+	}}}
+	arts := []models.Article{
+		{ID: 1, Title: "on1", Feed: "F", Content: "content one"},
+		{ID: 2, Title: "on2", Feed: "F", Content: "content two"},
+		{ID: 3, Title: "noemb", Feed: "F", Content: "content three"},
+	}
+	got := svc.filterOffTopic(arts)
+	if !containsTitle(got, "noemb") {
+		t.Errorf("article without embedding should be kept, got %v", titles(got))
+	}
+}
+
+func TestFilterOffTopic_LexicalFallback_DropsUnrelated(t *testing.T) {
+	svc := &Service{} // Embeddings nil → lexical gate
+	arts := []models.Article{
+		{ID: 1, Title: "on1", Feed: "F", Content: strings.Repeat("the government announced a new tax policy today ", 20)},
+		{ID: 2, Title: "on2", Feed: "F", Content: strings.Repeat("the government announced a new tax policy today ", 20)},
+		{ID: 3, Title: "off", Feed: "F", Content: strings.Repeat("quantum chromodynamics gluon quark lattice gauge ", 10)},
+	}
+	got := svc.filterOffTopic(arts)
+	if containsTitle(got, "off") {
+		t.Errorf("unrelated article should be dropped, got %v", titles(got))
+	}
+}
+
+func TestFilterOffTopic_SingleArticle_Untouched(t *testing.T) {
+	svc := &Service{Embeddings: &mockEmbeddingLookup{m: map[int64][]float32{1: {1, 0}}}}
+	arts := []models.Article{{ID: 1, Title: "solo", Feed: "F", Content: "just one article"}}
+	got := svc.filterOffTopic(arts)
+	if len(got) != 1 || got[0].Title != "solo" {
+		t.Errorf("single article should be untouched, got %v", titles(got))
+	}
+}
+
+func TestCosineSim(t *testing.T) {
+	if got := cosineSim([]float32{1, 0}, []float32{1, 0}); got != 1 {
+		t.Errorf("identical vectors should give 1, got %v", got)
+	}
+	if got := cosineSim([]float32{1, 0}, []float32{0, 1}); got != 0 {
+		t.Errorf("orthogonal vectors should give 0, got %v", got)
+	}
+	if got := cosineSim([]float32{0, 0}, []float32{1, 0}); got != 0 {
+		t.Errorf("zero vector should give 0, got %v", got)
+	}
+	if got := cosineSim([]float32{1, 0}, []float32{1}); got != 0 {
+		t.Errorf("mismatched length should give 0, got %v", got)
+	}
+}

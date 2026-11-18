@@ -84,7 +84,7 @@ func main() {
 
 	repo := &database.Repository{DB: db}
 	groupSvc := &grouping.Service{LLM: llmClient, Repo: repo, AIServiceURL: cfg.AIServiceURL}
-	summarizeSvc := &summarize.Service{LLM: llmClient, Extractor: summarize.NewExtractor()}
+	summarizeSvc := &summarize.Service{LLM: llmClient, Extractor: summarize.NewExtractor(), Embeddings: repo}
 
 	// Build the retry function (used for DB queries)
 	retryFn := func(hours int) (*models.DashboardData, error) {
