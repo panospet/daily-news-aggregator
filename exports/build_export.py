@@ -5,7 +5,7 @@ import re
 from collections import defaultdict
 
 SRC = "/tmp/fd.tsv"
-OUT_DIR = "/home/panos/daily-news-aggregator/exports"
+OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(OUT_DIR, "flydubai-2026-10-01.md")
 
 rows = []

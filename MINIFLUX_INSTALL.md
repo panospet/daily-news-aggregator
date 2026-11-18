@@ -121,7 +121,7 @@ services:
     # and binds to 0.0.0.0 so the Miniflux container can talk to it
     command: >
       access tcp
-      --hostname tinyproxy.panos.pet
+      --hostname ${CF_ACCESS_HOSTNAME}
       --url 0.0.0.0:8888
       --service-token-id ${CF_CLIENT_ID}
       --service-token-secret ${CF_CLIENT_SECRET}

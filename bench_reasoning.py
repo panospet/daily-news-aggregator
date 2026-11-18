@@ -8,12 +8,13 @@ For each model:
   pass B (non-stream) -> usage.completion_tokens_details.reasoning_tokens, JSON validity
 """
 import json
+import os
 import re
 import time
 import urllib.request
 
 ENV = {}
-for line in open("/home/panos/daily-news-aggregator/.env"):
+for line in open(os.path.join(os.path.dirname(__file__), ".env")):
     m = re.match(r"^([A-Z_0-9]+)=(.*)$", line.strip())
     if m:
         ENV[m.group(1)] = m.group(2).strip().strip('"').strip("'")

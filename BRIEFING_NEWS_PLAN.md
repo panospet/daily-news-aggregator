@@ -93,7 +93,7 @@ ai_cache refresh → pre-generate top-20 (07:45 / 19:45) → briefing runs (08:0
 - **Retry:** a failed group may be retried a couple of times before being dropped for that slot.
 - **Total failure** (LLM/API key down): store a **titles-only** block (`summary_text` = the topic title, or empty) so the briefing can still publish something; log and alert.
 - **Verification rejection** (HTTP 422 path): the group is simply skipped; this is normal operation, not an error to alarm on.
-- Log to the dashboard's existing logging; optional Telegram alert (reuse media-stack token).
+- Log to the dashboard's existing logging; optional Telegram alert (reuse the Telegram bot token).
 
 ---
 

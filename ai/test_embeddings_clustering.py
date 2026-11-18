@@ -62,7 +62,7 @@ def group_articles(articles):
     t0 = time.time()
     # 1. Load local lightweight embedding model
     print("[timing] Loading SentenceTransformer...", flush=True)
-    model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', cache_folder='/home/panos/.hermes/models')
+    model = SentenceTransformer('paraphrase-multilingual-MiniLM-L12-v2', cache_folder=os.getenv("EMBEDDING_CACHE_DIR"))
     print(f"[timing] Model loaded in {time.time() - t0:.2f}s", flush=True)
     
     # 2. Extract and encode titles
