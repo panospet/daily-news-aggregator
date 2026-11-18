@@ -14,6 +14,7 @@ A smart news aggregator that pulls feeds (via Miniflux), clusters them using an 
 
 ### 2. Dashboard UI & UX
 - Rebuilt the dashboard as **Newsroom**, an editorial interface inspired by a printed daily newspaper.
+- The product title is **newsbrief** (`<title>` and masthead brand in `templates/base.tmpl`). "Newsroom"/"newsroom" survives only as a generic noun and CSS class prefix (`.newsroom-shell`), not as the brand name.
 - Uses warm paper/ink themes, `Manrope` and `Noto Serif` typography, a sticky navigation rail, and a numbered story ledger.
 - Expanded stories use a reading-focused layout with grounded AI summaries beside their original sources.
 - Supports desktop and off-canvas mobile navigation, light/dark themes, responsive feed archive views, and accessible keyboard interactions.

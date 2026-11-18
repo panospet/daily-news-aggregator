@@ -1,4 +1,4 @@
-/* Newsroom interactions. The server remains the source of truth; HTMX handles navigation
+/* newsbrief interactions. The server remains the source of truth; HTMX handles navigation
    and this file adds read state, drawers, themes, and streaming summaries. */
 (function () {
   'use strict';
