@@ -18,6 +18,7 @@ type Config struct {
 	FallbackAPIKey    string
 	AuthUsername      string
 	AuthPassword      string
+	APIToken          string
 	AIServiceURL      string
 	RedisAddr         string
 
@@ -42,6 +43,7 @@ func Load() Config {
 		FallbackAPIKey:    EnvStr("GEMINI_API_KEY", ""),
 		AuthUsername:      EnvStr("AUTH_USERNAME", ""),
 		AuthPassword:      EnvStr("AUTH_PASSWORD", ""),
+		APIToken:          EnvStr("API_TOKEN", ""),
 		AIServiceURL:      EnvStr("AI_SERVICE_URL", "http://127.0.0.1:8001"),
 		RedisAddr:         EnvStr("REDIS_ADDR", "127.0.0.1:6379"),
 

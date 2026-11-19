@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,16 +26,36 @@ import (
 	"github.com/panospet/daily-news-aggregator/internal/summarize"
 )
 
-func basicAuthMiddleware(cfg config.Config, next http.Handler) http.Handler {
+// authMiddleware guards the whole server. HTTP Basic Auth is always accepted.
+// Additionally, a bearer token (API_TOKEN) is accepted on read-only GET API
+// routes so external consumers can call the JSON endpoints without the Basic
+// Auth credentials. Write paths (POST /summarize*, POST /feedback*, and
+// POST /api/briefing-news/generate) stay Basic-Auth-only.
+func authMiddleware(cfg config.Config, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
-		if !ok || user != cfg.AuthUsername || pass != cfg.AuthPassword {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		if user, pass, ok := r.BasicAuth(); ok && user == cfg.AuthUsername && pass == cfg.AuthPassword {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		if cfg.APIToken != "" && r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/") {
+			if tok := bearerToken(r); tok != "" && tok == cfg.APIToken {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		w.Header().Set("WWW-Authenticate", `Basic realm="Restricted"`)
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
 	})
+}
+
+// bearerToken extracts the token from an "Authorization: Bearer <token>" header.
+func bearerToken(r *http.Request) string {
+	h := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(h) > len(prefix) && strings.EqualFold(h[:len(prefix)], prefix) {
+		return strings.TrimSpace(h[len(prefix):])
+	}
+	return ""
 }
 
 func main() {
@@ -124,12 +145,13 @@ func main() {
 
 	mux := http.NewServeMux()
 	srv.RegisterRoutes(mux)
+	srv.RegisterAPIRoutes(mux)
 	mux.Handle("GET /static/", http.StripPrefix("/static/", handler.StaticHandler(htmxdailynews.EmbeddedFS)))
 
 	addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 	httpServer := &http.Server{
 		Addr:    addr,
-		Handler: basicAuthMiddleware(cfg, handler.GzipMiddleware(mux)),
+		Handler: authMiddleware(cfg, handler.GzipMiddleware(mux)),
 	}
 
 	// Graceful shutdown: finish in-flight requests (including long AI

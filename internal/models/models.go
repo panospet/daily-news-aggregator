@@ -14,6 +14,16 @@ type Article struct {
 	TimeAgo   string    `json:"time_ago"`
 }
 
+// FeedInfo describes a single Miniflux feed for the read-only API.
+type FeedInfo struct {
+	ID           int64  `json:"id"`
+	Title        string `json:"title"`
+	SiteURL      string `json:"site_url"`
+	Category     string `json:"category"`
+	Disabled     bool   `json:"disabled"`
+	ArticleCount int    `json:"article_count"`
+}
+
 // CategoryGroup holds articles in a single Miniflux category.
 type CategoryGroup struct {
 	Category string

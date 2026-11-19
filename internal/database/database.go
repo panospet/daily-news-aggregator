@@ -339,3 +339,117 @@ func parseVector(s string) ([]float32, error) {
 	}
 	return result, nil
 }
+
+// ListFeeds returns every Miniflux feed with its category, disabled flag and
+// total stored entry count, ordered by title.
+func (r *Repository) ListFeeds() ([]models.FeedInfo, error) {
+	rows, err := r.DB.Query(`
+		SELECT f.id, f.title, COALESCE(f.site_url, ''), COALESCE(c.title, ''),
+		       COALESCE(f.disabled, false), COUNT(e.id) AS article_count
+		FROM feeds f
+		LEFT JOIN categories c ON c.id = f.category_id
+		LEFT JOIN entries e ON e.feed_id = f.id
+		GROUP BY f.id, f.title, f.site_url, c.title, f.disabled
+		ORDER BY LOWER(f.title)
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("list feeds: %w", err)
+	}
+	defer rows.Close()
+
+	var feeds []models.FeedInfo
+	for rows.Next() {
+		var f models.FeedInfo
+		if err := rows.Scan(&f.ID, &f.Title, &f.SiteURL, &f.Category, &f.Disabled, &f.ArticleCount); err != nil {
+			return nil, fmt.Errorf("scan feed: %w", err)
+		}
+		feeds = append(feeds, f)
+	}
+	return feeds, rows.Err()
+}
+
+// articlesFlatFilter builds the WHERE clause and bind arguments shared by
+// QueryArticlesFlat and CountArticlesFlat, so a page and its total can never
+// disagree about which rows they describe.
+// The text query must already be lowercased and accent-stripped by the caller.
+func articlesFlatFilter(feedID int64, category string, since time.Time, query string) (string, []interface{}) {
+	where := []string{"(f.disabled = false OR f.disabled IS NULL)"}
+	args := []interface{}{}
+	argIdx := 1
+
+	if feedID > 0 {
+		args = append(args, feedID)
+		where = append(where, fmt.Sprintf("e.feed_id = $%d", argIdx))
+		argIdx++
+	}
+	if category != "" {
+		args = append(args, category)
+		where = append(where, fmt.Sprintf("c.title ILIKE $%d", argIdx))
+		argIdx++
+	}
+	if !since.IsZero() {
+		args = append(args, since)
+		where = append(where, fmt.Sprintf("e.published_at >= $%d", argIdx))
+		argIdx++
+	}
+	if query != "" {
+		args = append(args, query)
+		where = append(where, fmt.Sprintf(
+			"(translate(lower(e.title), 'άέήίόύώϊϋΐΰ', 'αεηιουωιυιυ') LIKE '%%' || $%d || '%%' OR translate(lower(f.title), 'άέήίόύώϊϋΐΰ', 'αεηιουωιυιυ') LIKE '%%' || $%d || '%%')",
+			argIdx, argIdx))
+		argIdx++
+	}
+
+	return strings.Join(where, " AND "), args
+}
+
+// QueryArticlesFlat returns a flat, paginated list of articles from the Miniflux
+// database, optionally filtered by feed id, Miniflux feed category, publication
+// time floor and a case/accent-insensitive text query (title + feed title).
+func (r *Repository) QueryArticlesFlat(feedID int64, category string, since time.Time, query string, limit, offset int) ([]models.Article, error) {
+	where, args := articlesFlatFilter(feedID, category, since, query)
+	argIdx := len(args) + 1
+	queryStr := fmt.Sprintf(`
+		SELECT e.id, e.title, e.url, e.published_at, f.title AS feed, c.title AS category
+		FROM entries e
+		JOIN feeds f ON f.id = e.feed_id
+		JOIN categories c ON c.id = f.category_id
+		WHERE %s
+		ORDER BY e.published_at DESC
+		LIMIT $%d OFFSET $%d
+	`, where, argIdx, argIdx+1)
+
+	rows, err := r.DB.Query(queryStr, append(args, limit, offset)...)
+	if err != nil {
+		return nil, fmt.Errorf("query articles flat: %w", err)
+	}
+	defer rows.Close()
+
+	var articles []models.Article
+	for rows.Next() {
+		var a models.Article
+		if err := rows.Scan(&a.ID, &a.Title, &a.URL, &a.Published, &a.Feed, &a.Category); err != nil {
+			return nil, fmt.Errorf("scan article: %w", err)
+		}
+		articles = append(articles, a)
+	}
+	return articles, rows.Err()
+}
+
+// CountArticlesFlat returns how many articles match the filters of
+// QueryArticlesFlat, ignoring pagination. It uses the same filter builder, so
+// the count always describes the same row set as the returned page.
+func (r *Repository) CountArticlesFlat(feedID int64, category string, since time.Time, query string) (int, error) {
+	where, args := articlesFlatFilter(feedID, category, since, query)
+	var n int
+	err := r.DB.QueryRow(`
+		SELECT count(*)
+		FROM entries e
+		JOIN feeds f ON f.id = e.feed_id
+		JOIN categories c ON c.id = f.category_id
+		WHERE `+where, args...).Scan(&n)
+	if err != nil {
+		return 0, fmt.Errorf("count articles flat: %w", err)
+	}
+	return n, nil
+}
